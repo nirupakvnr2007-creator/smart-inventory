@@ -9,6 +9,7 @@ import { PosBillingScreen } from './components/screens/PosBillingScreen';
 import { SalesTrendDashboard } from './components/screens/SalesTrendDashboard';
 import { ForumScreen } from './components/screens/ForumScreen';
 import { PublicCustomerFeedbackScreen } from './components/screens/PublicCustomerFeedbackScreen';
+import { MongoCompassSyncModal } from './components/screens/MongoCompassSyncModal';
 import {
   fetchServerData,
   apiSaveShop,
@@ -21,7 +22,8 @@ import {
   apiUpdateRestockStatus,
   apiSaveForumPost,
   apiSaveReply,
-  apiSaveReview
+  apiSaveReview,
+  apiGetMongoStatus
 } from './services/api';
 import {
   loadStoredData,
@@ -68,6 +70,9 @@ export default function App() {
 
   // Modals & Public Feedback Route
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isMongoSyncOpen, setIsMongoSyncOpen] = useState(false);
+  const [isMongoConnected, setIsMongoConnected] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [activeFeedbackProductId, setActiveFeedbackProductId] = useState<string | null>(null);
 
   // Toast Notification state
@@ -82,15 +87,36 @@ export default function App() {
 
   // Multi-device synchronization: Fetch server data on mount and periodically
   const syncWithServer = useCallback(async () => {
-    const serverData = await fetchServerData();
-    if (serverData) {
-      if (serverData.shop) setCurrentShop(serverData.shop);
-      if (Array.isArray(serverData.users)) setUsers(serverData.users);
-      if (Array.isArray(serverData.products)) setProducts(serverData.products);
-      if (Array.isArray(serverData.restockRequests)) setRestockRequests(serverData.restockRequests);
-      if (Array.isArray(serverData.transactions)) setTransactions(serverData.transactions);
-      if (Array.isArray(serverData.forumPosts)) setForumPosts(serverData.forumPosts);
-      if (Array.isArray(serverData.reviews)) setReviews(serverData.reviews);
+    setIsSyncing(true);
+    try {
+      const serverData = await fetchServerData();
+      if (serverData) {
+        if (serverData.shop) setCurrentShop(serverData.shop);
+        if (Array.isArray(serverData.users) && serverData.users.length > 0) {
+          setUsers(serverData.users);
+        }
+        if (Array.isArray(serverData.products) && serverData.products.length > 0) {
+          setProducts(serverData.products);
+        }
+        if (Array.isArray(serverData.restockRequests)) {
+          setRestockRequests(serverData.restockRequests);
+        }
+        if (Array.isArray(serverData.transactions)) {
+          setTransactions(serverData.transactions);
+        }
+        if (Array.isArray(serverData.forumPosts)) {
+          setForumPosts(serverData.forumPosts);
+        }
+        if (Array.isArray(serverData.reviews)) {
+          setReviews(serverData.reviews);
+        }
+      }
+
+      // Check MongoDB status
+      const mongoStat = await apiGetMongoStatus();
+      setIsMongoConnected(Boolean(mongoStat?.connected));
+    } finally {
+      setIsSyncing(false);
     }
   }, []);
 
@@ -203,7 +229,7 @@ export default function App() {
     await apiDeleteProduct(productId);
   };
 
-  // Manager Stock Edit Handler (Feature: Option for manager to edit stock upon approval or anytime)
+  // Manager Stock Edit Handler
   const handleUpdateStock = async (productId: string, newStock: number) => {
     setProducts((prev) =>
       prev.map((p) => (p.id === productId ? { ...p, availableStock: newStock } : p))
@@ -256,28 +282,58 @@ export default function App() {
       paymentMethod
     };
 
+    // 1. Immediately deduct stock in local UI
+    setProducts((prev) =>
+      prev.map((prod) => {
+        const soldItem = items.find((i) => i.productId === prod.id || i.sku === prod.sku);
+        if (soldItem) {
+          const nextStock = Math.max(0, prod.availableStock - soldItem.quantity);
+          return { ...prod, availableStock: nextStock };
+        }
+        return prod;
+      })
+    );
+
+    // 2. Add transaction to local list
     setTransactions((prev) => [newTxn, ...prev]);
 
-    // Decrement available stock in local state
-    const updatedProducts = products.map((p) => {
-      const billed = items.find((i) => i.productId === p.id || i.sku === p.sku);
-      if (billed) {
-        return {
-          ...p,
-          availableStock: Math.max(0, p.availableStock - billed.quantity)
-        };
+    // 3. Post to backend DB
+    await apiSaveTransaction(newTxn);
+
+    // 4. Check if any product went below minimum threshold
+    items.forEach((soldItem) => {
+      const prod = products.find((p) => p.id === soldItem.productId || p.sku === soldItem.sku);
+      if (prod) {
+        const remaining = prod.availableStock - soldItem.quantity;
+        if (remaining <= prod.minThreshold) {
+          const existingReq = restockRequests.find(
+            (r) => r.productId === prod.id && r.status === 'Pending'
+          );
+          if (!existingReq) {
+            const autoReq: RestockRequest = {
+              id: `req-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              productId: prod.id,
+              productName: prod.name,
+              brand: prod.brand,
+              currentStock: Math.max(0, remaining),
+              minThreshold: prod.minThreshold,
+              requestedQuantity: prod.minThreshold,
+              supplierName: prod.supplierName,
+              supplierEmail: prod.supplierEmail,
+              supplierPhone: prod.supplierPhone,
+              status: 'Pending',
+              createdAt: new Date().toISOString()
+            };
+            setRestockRequests((prev) => [autoReq, ...prev]);
+          }
+        }
       }
-      return p;
     });
 
-    setProducts(updatedProducts);
-
-    // Save transaction and decrement stock on server database
-    await apiSaveTransaction(newTxn);
-    syncWithServer();
+    showToast(`Bill ${receiptNum} recorded! Stock decremented and customer phone saved.`);
   };
 
-  // Forum Handlers
+  // Forum Discussion Handlers
   const handleAddForumPost = async (post: ForumPost) => {
     setForumPosts((prev) => [post, ...prev]);
     await apiSaveForumPost(post);
@@ -286,64 +342,76 @@ export default function App() {
   const handleAddReply = async (
     postId: string,
     content: string,
-    authorName: string,
-    authorRole: UserAccount['role']
+    author: string,
+    role: any
   ) => {
-    const newReply = {
+    const reply = {
       id: `rep-${Date.now()}`,
-      authorName,
-      authorRole,
+      authorName: author,
+      authorRole: role,
       content,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
-
     setForumPosts((prev) =>
       prev.map((p) => {
         if (p.id === postId) {
           return {
             ...p,
-            replies: [...(p.replies || []), newReply]
+            replies: [...(p.replies || []), reply]
           };
         }
         return p;
       })
     );
-
-    await apiSaveReply(postId, newReply);
+    await apiSaveReply(postId, reply);
   };
 
-  // Customer Reviews Handlers
+  // Customer Feedback Handler
   const handleAddReview = async (review: CustomerReview) => {
-    setReviews((prev) => [review, ...prev]);
+    const updated = [review, ...reviews];
+    setReviews(updated);
+    saveReviews(updated);
     await apiSaveReview(review);
   };
 
-  const handleCloseFeedbackPage = () => {
-    setActiveFeedbackProductId(null);
-    if (typeof window !== 'undefined' && window.location.search) {
-      window.history.pushState({}, '', window.location.pathname);
-    }
-  };
+  // Calculate critical alerts count for notification bell badge
+  const criticalCount = restockRequests.filter((r) => r.status === 'Pending').length;
 
-  const criticalCount = products.filter((p) => p.availableStock <= p.minThreshold).length;
-
-  // 1. PUBLIC ROUTE: Customer scans packaging QR code or opens ?feedback=<productId>
+  // 1. PUBLIC CUSTOMER FEEDBACK PORTAL (Accessible by scanning product packaging QR code)
   if (activeFeedbackProductId) {
     return (
-      <PublicCustomerFeedbackScreen
-        productId={activeFeedbackProductId}
-        products={products}
-        shop={currentShop}
-        transactions={transactions}
-        reviews={reviews}
-        onAddReview={handleAddReview}
-        onClose={handleCloseFeedbackPage}
-        onShowToast={showToast}
-      />
+      <>
+        <PublicCustomerFeedbackScreen
+          productId={activeFeedbackProductId}
+          products={products}
+          shop={currentShop}
+          transactions={transactions}
+          reviews={reviews}
+          onAddReview={handleAddReview}
+          onClose={() => setActiveFeedbackProductId(null)}
+          onShowToast={showToast}
+        />
+        {toastMessage && (
+          <div className="fixed top-6 left-4 right-4 max-w-md mx-auto z-50 bg-[#0b1c30] text-white px-4 py-3 rounded-xl shadow-xl flex items-center justify-between border border-[#213145] animate-in fade-in duration-200">
+            <div className="flex items-center gap-2.5">
+              <span className="material-symbols-outlined text-[#85f8c4] text-[20px]">
+                check_circle
+              </span>
+              <span className="text-[13px] font-medium">{toastMessage}</span>
+            </div>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="text-white/70 hover:text-white ml-2 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          </div>
+        )}
+      </>
     );
   }
 
-  // 2. AUTHENTICATION GATEWAY: If not signed in, show Login & Register first!
+  // 2. LOGIN / REGISTER SCREEN (Presented when not logged in)
   if (!currentUser) {
     return (
       <>
@@ -353,6 +421,7 @@ export default function App() {
           onRegisterShop={handleRegisterShop}
           onLoginSuccess={handleLoginSuccess}
           onShowToast={showToast}
+          isSyncingWithServer={isSyncing}
         />
         {toastMessage && (
           <div className="fixed top-6 left-4 right-4 max-w-md mx-auto z-50 bg-[#0b1c30] text-white px-4 py-3 rounded-xl shadow-xl flex items-center justify-between border border-[#213145] animate-in fade-in duration-200">
@@ -377,7 +446,7 @@ export default function App() {
   // 3. AUTHENTICATED SHOP CONSOLE: Strictly by user's assigned role
   return (
     <div className="bg-[#f8f9ff] min-h-screen text-[#0b1c30] flex flex-col font-sans antialiased selection:bg-[#dce1ff] selection:text-[#001551]">
-      {/* Top Header (Strictly without profile switching) */}
+      {/* Top Header */}
       <Header
         currentTab={activeTab}
         activeRole={currentUser.role}
@@ -395,6 +464,8 @@ export default function App() {
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onLogout={handleLogout}
         notificationCount={criticalCount}
+        onOpenMongoSync={() => setIsMongoSyncOpen(true)}
+        isMongoConnected={isMongoConnected}
       />
 
       {/* Main Content Area */}
@@ -420,12 +491,13 @@ export default function App() {
           />
         )}
 
-        {/* MANAGER / OWNER: Product Catalog, Stock Editing, Packaging QR & Restock */}
+        {/* MANAGER / OWNER: Product Catalog, Stock Editing, Packaging QR, Reviews & Restock */}
         {(activeTab === 'inventory' || activeTab === 'restock') &&
           (currentUser.role === 'Manager' || currentUser.role === 'Owner') && (
             <ManagerProductsScreen
               products={products}
               restockRequests={restockRequests}
+              reviews={reviews}
               currentShop={
                 currentShop || {
                   id: 'shop-01',
@@ -505,6 +577,19 @@ export default function App() {
             showToast('Restock requests are managed by the Store Manager.');
           }
         }}
+      />
+
+      {/* MongoDB Compass Synchronization Modal */}
+      <MongoCompassSyncModal
+        isOpen={isMongoSyncOpen}
+        onClose={() => setIsMongoSyncOpen(false)}
+        products={products}
+        transactions={transactions}
+        reviews={reviews}
+        users={users}
+        currentShop={currentShop}
+        onRefreshData={syncWithServer}
+        onShowToast={showToast}
       />
 
       {/* Global Toast Notification */}

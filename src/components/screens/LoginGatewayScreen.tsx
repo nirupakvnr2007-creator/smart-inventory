@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ShopProfile, UserAccount } from '../../types';
+import { apiLogin } from '../../services/api';
 
 interface LoginGatewayScreenProps {
   currentShop: ShopProfile | null;
@@ -7,6 +8,7 @@ interface LoginGatewayScreenProps {
   onRegisterShop: (shop: ShopProfile, owner: UserAccount) => void;
   onLoginSuccess: (user: UserAccount) => void;
   onShowToast: (msg: string) => void;
+  isSyncingWithServer?: boolean;
 }
 
 export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
@@ -14,7 +16,8 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
   users,
   onRegisterShop,
   onLoginSuccess,
-  onShowToast
+  onShowToast,
+  isSyncingWithServer = false
 }) => {
   // If no shop exists, default to register. Otherwise default to login.
   const [mode, setMode] = useState<'login' | 'register'>(currentShop ? 'login' : 'register');
@@ -25,18 +28,23 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
 
   // Login Form
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!shopName.trim() || !ownerName.trim() || !email.trim() || !password.trim()) {
       setErrorMessage('Please fill in all required shop and owner details.');
       return;
     }
+
+    setIsRegistering(true);
+    setErrorMessage('');
 
     const shop: ShopProfile = {
       id: `shop-${Date.now()}`,
@@ -57,25 +65,73 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
       createdAt: new Date().toISOString()
     };
 
-    onRegisterShop(shop, owner);
-    onLoginSuccess(owner);
-    onShowToast(`Shop "${shop.name}" registered successfully! Welcome, ${owner.name}.`);
+    try {
+      onRegisterShop(shop, owner);
+      onLoginSuccess(owner);
+      onShowToast(`Shop "${shop.name}" registered successfully! Welcome, ${owner.name}.`);
+    } finally {
+      setIsRegistering(false);
+    }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    const cleanEmail = loginEmail.trim().toLowerCase();
+    const cleanPassword = loginPassword.trim();
 
-    const trimmedEmail = loginEmail.trim().toLowerCase();
-    const matchedUser = users.find(
-      (u) => u.email.toLowerCase() === trimmedEmail && u.password === loginPassword.trim()
-    );
+    if (!cleanEmail || !cleanPassword) {
+      setErrorMessage('Please enter both email and password.');
+      return;
+    }
 
-    if (matchedUser) {
-      onLoginSuccess(matchedUser);
-      onShowToast(`Welcome back, ${matchedUser.name} (${matchedUser.role})!`);
-    } else {
-      setErrorMessage('Invalid email or password. Please verify your credentials or ask the Owner.');
+    setIsLoggingIn(true);
+
+    try {
+      // 1. Direct Server Authentication (Ensures multi-browser / multi-device synchronization)
+      const res = await apiLogin(cleanEmail, cleanPassword);
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
+        onShowToast(`Welcome back, ${res.user.name} (${res.user.role})!`);
+        return;
+      }
+
+      // 2. Offline Fallback: Check local cached accounts if offline or server returned error
+      const matchedUser = users.find(
+        (u) =>
+          (u.email || '').toLowerCase() === cleanEmail &&
+          (u.password || '').trim() === cleanPassword
+      );
+
+      if (matchedUser) {
+        onLoginSuccess(matchedUser);
+        onShowToast(`Welcome back, ${matchedUser.name} (${matchedUser.role})! [Offline Mode]`);
+        return;
+      }
+
+      // If user not found, give clear, helpful message
+      if (res.message && res.message !== 'Server verification error') {
+        setErrorMessage(res.message);
+      } else {
+        setErrorMessage(
+          'Invalid email id or password. If you registered on another device, ensure credentials match or ask the Shop Owner to verify your staff account.'
+        );
+      }
+    } catch {
+      // Check local cached array
+      const matchedUser = users.find(
+        (u) =>
+          (u.email || '').toLowerCase() === cleanEmail &&
+          (u.password || '').trim() === cleanPassword
+      );
+      if (matchedUser) {
+        onLoginSuccess(matchedUser);
+        onShowToast(`Welcome back, ${matchedUser.name} (${matchedUser.role})! [Offline Mode]`);
+      } else {
+        setErrorMessage('Invalid email or password. Please verify your credentials or ask the Owner.');
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -90,9 +146,21 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
           <h1 className="font-headline font-bold text-[22px] text-[#0b1c30]">
             Smart Inventory Assistant
           </h1>
-          <p className="text-[12px] text-[#565e74]">
-            {currentShop ? currentShop.name : 'Centralized Retail Management System'}
-          </p>
+          <div className="flex items-center justify-center gap-1.5 text-[12px] text-[#565e74]">
+            {currentShop ? (
+              <span className="inline-flex items-center gap-1 font-semibold text-[#0037b0] bg-[#eff4ff] px-2.5 py-0.5 rounded-full border border-[#dae2fd]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#004f35]"></span>
+                Shop: {currentShop.name}
+              </span>
+            ) : (
+              <span>Centralized Retail Management System</span>
+            )}
+            {isSyncingWithServer && (
+              <span className="text-[10px] text-[#0037b0] animate-pulse">
+                (Syncing DB...)
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Mode Switcher Tabs */}
@@ -138,140 +206,190 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
 
         {/* Mode: Login */}
         {mode === 'login' && (
-          <form onSubmit={handleLogin} className="space-y-3.5">
-            <div className="space-y-1">
-              <label className="text-[12px] font-semibold text-[#0b1c30]">Email Address</label>
-              <div className="w-full bg-[#eff4ff] border border-[#dae2fd] rounded-lg p-2.5 flex items-center gap-2 focus-within:bg-white focus-within:border-[#0037b0] focus-within:ring-2 focus-within:ring-[#0037b0]/20 transition-all">
-                <span className="material-symbols-outlined text-[#747686] text-[18px]">mail</span>
-                <input
-                  type="email"
-                  required
-                  placeholder="Enter your registered email"
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  className="w-full bg-transparent text-[13px] text-[#0b1c30] outline-none"
-                />
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-[#565e74] uppercase tracking-wider mb-1">
+                  Registered Email Address
+                </label>
+                <div className="relative">
+                  <span className="material-symbols-outlined absolute left-3 top-2.5 text-[#565e74] text-[18px]">
+                    mail
+                  </span>
+                  <input
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="e.g. owner@shop.com or cashier@shop.com"
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-[#c3cadb] rounded-lg text-[13px] text-[#0b1c30] placeholder-[#8e909a] focus:outline-none focus:border-[#0037b0] focus:ring-1 focus:ring-[#0037b0]"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="space-y-1">
-              <label className="text-[12px] font-semibold text-[#0b1c30]">Password</label>
-              <div className="w-full bg-[#eff4ff] border border-[#dae2fd] rounded-lg p-2.5 flex items-center gap-2 focus-within:bg-white focus-within:border-[#0037b0] focus-within:ring-2 focus-within:ring-[#0037b0]/20 transition-all">
-                <span className="material-symbols-outlined text-[#747686] text-[18px]">lock</span>
-                <input
-                  type="password"
-                  required
-                  placeholder="Enter your password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  className="w-full bg-transparent text-[13px] text-[#0b1c30] outline-none"
-                />
+              <div>
+                <label className="block text-[11px] font-bold text-[#565e74] uppercase tracking-wider mb-1">
+                  Password
+                </label>
+                <div className="relative">
+                  <span className="material-symbols-outlined absolute left-3 top-2.5 text-[#565e74] text-[18px]">
+                    lock
+                  </span>
+                  <input
+                    type="password"
+                    required
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="Enter your account password"
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-[#c3cadb] rounded-lg text-[13px] text-[#0b1c30] placeholder-[#8e909a] focus:outline-none focus:border-[#0037b0] focus:ring-1 focus:ring-[#0037b0]"
+                  />
+                </div>
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 bg-[#0037b0] hover:bg-[#1d4ed8] text-white rounded-lg text-[13px] font-bold shadow-sm active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
+              disabled={isLoggingIn}
+              className="w-full py-2.5 bg-[#0037b0] hover:bg-[#1d4ed8] disabled:opacity-60 text-white rounded-lg text-[13px] font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[18px]">login</span>
-              <span>Sign In to Shop</span>
+              {isLoggingIn ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span>Verifying Credentials...</span>
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[18px]">lock_open</span>
+                  <span>Sign In to Shop</span>
+                </>
+              )}
             </button>
 
-            {users.length === 0 && (
-              <p className="text-[11px] text-[#565e74] text-center pt-2">
-                No accounts created yet. Please register your shop first to create the Owner account.
-              </p>
-            )}
+            <div className="pt-2 border-t border-[#eff4ff] text-center">
+              <span className="text-[11px] text-[#565e74]">
+                New Shop Owner?{' '}
+                <button
+                  type="button"
+                  onClick={() => setMode('register')}
+                  className="text-[#0037b0] font-bold hover:underline cursor-pointer"
+                >
+                  Register your shop here
+                </button>
+              </span>
+            </div>
           </form>
         )}
 
         {/* Mode: Register Shop */}
         {mode === 'register' && (
           <form onSubmit={handleRegister} className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-[12px] font-semibold text-[#0b1c30]">
-                Shop / Outlet Name *
+            <div>
+              <label className="block text-[11px] font-bold text-[#565e74] uppercase tracking-wider mb-1">
+                Shop / Store Name *
               </label>
               <input
                 type="text"
                 required
-                placeholder="e.g. Metro Grocery Mart"
                 value={shopName}
                 onChange={(e) => setShopName(e.target.value)}
-                className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2.5 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                placeholder="e.g. Metro Mart & Provisions"
+                className="w-full px-3 py-2 bg-white border border-[#c3cadb] rounded-lg text-[13px] text-[#0b1c30] placeholder-[#8e909a] focus:outline-none focus:border-[#0037b0] focus:ring-1 focus:ring-[#0037b0]"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[12px] font-semibold text-[#0b1c30]">
+              <div>
+                <label className="block text-[11px] font-bold text-[#565e74] uppercase tracking-wider mb-1">
                   Owner Full Name *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="Owner Name"
                   value={ownerName}
                   onChange={(e) => setOwnerName(e.target.value)}
-                  className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                  placeholder="e.g. Ramesh Kumar"
+                  className="w-full px-3 py-2 bg-white border border-[#c3cadb] rounded-lg text-[13px] text-[#0b1c30] placeholder-[#8e909a] focus:outline-none focus:border-[#0037b0] focus:ring-1 focus:ring-[#0037b0]"
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-[12px] font-semibold text-[#0b1c30]">Contact Phone</label>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[#565e74] uppercase tracking-wider mb-1">
+                  Contact Phone
+                </label>
                 <input
                   type="tel"
-                  placeholder="Phone number"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                  placeholder="+91 98400 12345"
+                  className="w-full px-3 py-2 bg-white border border-[#c3cadb] rounded-lg text-[13px] text-[#0b1c30] placeholder-[#8e909a] focus:outline-none focus:border-[#0037b0] focus:ring-1 focus:ring-[#0037b0]"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[12px] font-semibold text-[#0b1c30]">
-                  Owner Email *
-                </label>
-                <input
-                  type="email"
-                  required
-                  placeholder="owner@domain.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[12px] font-semibold text-[#0b1c30]">
-                  Password *
-                </label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Create password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
-                />
-              </div>
+            <div>
+              <label className="block text-[11px] font-bold text-[#565e74] uppercase tracking-wider mb-1">
+                Owner Login Email *
+              </label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="owner@yourshop.com"
+                className="w-full px-3 py-2 bg-white border border-[#c3cadb] rounded-lg text-[13px] text-[#0b1c30] placeholder-[#8e909a] focus:outline-none focus:border-[#0037b0] focus:ring-1 focus:ring-[#0037b0]"
+              />
             </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-[#565e74] uppercase tracking-wider mb-1">
+                Owner Login Password *
+              </label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Choose a secure password"
+                className="w-full px-3 py-2 bg-white border border-[#c3cadb] rounded-lg text-[13px] text-[#0b1c30] placeholder-[#8e909a] focus:outline-none focus:border-[#0037b0] focus:ring-1 focus:ring-[#0037b0]"
+              />
+            </div>
+
+            <p className="text-[11px] text-[#565e74] italic">
+              After registration, the Owner can create accounts for Managers, Cashiers, and Helpers with role-specific privileges.
+            </p>
 
             <button
               type="submit"
-              className="w-full py-3 bg-[#0037b0] hover:bg-[#1d4ed8] text-white rounded-lg text-[13px] font-bold shadow-sm active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
+              disabled={isRegistering}
+              className="w-full py-2.5 bg-[#0037b0] hover:bg-[#1d4ed8] disabled:opacity-60 text-white rounded-lg text-[13px] font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer mt-2"
             >
-              <span className="material-symbols-outlined text-[18px]">how_to_reg</span>
-              <span>Register Shop &amp; Enter as Owner</span>
+              {isRegistering ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span>Registering Shop...</span>
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[18px]">verified</span>
+                  <span>Complete Shop Registration</span>
+                </>
+              )}
             </button>
+
+            <div className="pt-2 border-t border-[#eff4ff] text-center">
+              <span className="text-[11px] text-[#565e74]">
+                Already have a shop account?{' '}
+                <button
+                  type="button"
+                  onClick={() => setMode('login')}
+                  className="text-[#0037b0] font-bold hover:underline cursor-pointer"
+                >
+                  Sign in here
+                </button>
+              </span>
+            </div>
           </form>
         )}
-
-        <div className="text-center pt-2 border-t border-[#eff4ff]">
-          <span className="text-[11px] text-[#565e74]">
-            Privilege Tiers: Owner • Manager • Cashier • Helper
-          </span>
-        </div>
       </div>
     </div>
   );

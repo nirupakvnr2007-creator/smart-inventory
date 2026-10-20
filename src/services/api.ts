@@ -18,6 +18,14 @@ export interface AppData {
   reviews: CustomerReview[];
 }
 
+export interface MongoStatus {
+  connected: boolean;
+  uriMasked: string;
+  databaseName: string;
+  counts: Record<string, number>;
+  lastError: string | null;
+}
+
 export async function fetchServerData(): Promise<AppData | null> {
   try {
     const res = await fetch('/api/data');
@@ -26,6 +34,24 @@ export async function fetchServerData(): Promise<AppData | null> {
   } catch (err) {
     console.warn('Could not fetch server data, using local store', err);
     return null;
+  }
+}
+
+export async function apiLogin(
+  email: string,
+  password: string
+): Promise<{ success: boolean; user?: UserAccount; message?: string }> {
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    console.warn('Backend login fetch failed (offline or network):', err);
+    return { success: false, message: 'Network offline. Attempting offline cached credentials.' };
   }
 }
 
@@ -170,5 +196,50 @@ export async function apiSaveReply(
     });
   } catch (err) {
     console.error('apiSaveReply error:', err);
+  }
+}
+
+// MongoDB & Compass Sync APIs
+export async function apiGetMongoStatus(): Promise<MongoStatus> {
+  try {
+    const res = await fetch('/api/mongodb/status');
+    return await res.json();
+  } catch {
+    return {
+      connected: false,
+      uriMasked: '',
+      databaseName: 'smart_inventory',
+      counts: {},
+      lastError: 'Server unreachable'
+    };
+  }
+}
+
+export async function apiSetMongoUri(uri: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch('/api/mongodb/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uri })
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Failed to connect to MongoDB' };
+  }
+}
+
+export async function apiImportCompassData(
+  collection: string,
+  documents: any[]
+): Promise<{ success: boolean; count: number; products?: ProductItem[] }> {
+  try {
+    const res = await fetch('/api/mongodb/import-compass', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection, documents })
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, count: 0 };
   }
 }

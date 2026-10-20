@@ -9,6 +9,8 @@ interface HeaderProps {
   onOpenNotifications: () => void;
   onLogout: () => void;
   notificationCount: number;
+  onOpenMongoSync?: () => void;
+  isMongoConnected?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,7 +20,9 @@ export const Header: React.FC<HeaderProps> = ({
   currentShop,
   onOpenNotifications,
   onLogout,
-  notificationCount
+  notificationCount,
+  onOpenMongoSync,
+  isMongoConnected = false
 }) => {
   const [showProfileModal, setShowProfileModal] = useState(false);
 
@@ -44,7 +48,20 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* User controls (Strictly no role switching allowed!) */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* MongoDB Compass Live Sync Button */}
+            {onOpenMongoSync && (
+              <button
+                onClick={onOpenMongoSync}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-[#f0fdf4] hover:bg-[#dcfce7] text-[#166534] border border-[#bbf7d0] transition-colors cursor-pointer shadow-2xs"
+                title="MongoDB Compass Synchronization Manager"
+              >
+                <span className="w-2 h-2 rounded-full bg-[#16a34a] animate-pulse"></span>
+                <span className="hidden sm:inline">MongoDB Compass</span>
+                <span className="sm:hidden">DB</span>
+              </button>
+            )}
+
             {/* Logged in User Profile Chip */}
             <div className="relative">
               <button
