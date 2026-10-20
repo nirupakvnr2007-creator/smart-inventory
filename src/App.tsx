@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { NotificationDrawer } from './components/NotificationDrawer';
+import { LoginGatewayScreen } from './components/screens/LoginGatewayScreen';
+import { DbSchemaModal } from './components/screens/DbSchemaModal';
 import { AuthStoreScreen } from './components/screens/AuthStoreScreen';
 import { RestockSuppliersScreen } from './components/screens/RestockSuppliersScreen';
 import { SkuDetailScreen } from './components/screens/SkuDetailScreen';
@@ -27,15 +29,30 @@ import {
   CartItem,
   SalesTransaction,
   ProductRecommendation,
-  RoleType
+  ShopProfile
 } from './types';
 
 export default function App() {
+  // Authentication Gateway State: Opened first as requested!
+  const [currentUser, setCurrentUser] = useState<StaffMember | null>(null);
+
+  // Shop Profile State
+  const [currentShop, setCurrentShop] = useState<ShopProfile>({
+    id: 'shop-01',
+    name: 'GreenHarvest Supermarket',
+    ownerName: 'Dr. Maya Chen',
+    phone: '+91 98401 23456',
+    email: 'owner@greenharvest.io',
+    tenantCode: 'GH-9840-01',
+    cluster: 'localhost:27017',
+    databaseName: 'smart_inventory'
+  });
+
   const [activeTab, setActiveTab] = useState<string>('auth-store');
   const [previousTab, setPreviousTab] = useState<string>('auth-store');
   const [selectedSkuForDetail, setSelectedSkuForDetail] = useState<string>('SKU-103');
-  const [activeRole, setActiveRole] = useState<RoleType>('Owner');
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isDbSchemaOpen, setIsDbSchemaOpen] = useState(false);
 
   // Core App State
   const [products, setProducts] = useState<ProductItem[]>(INITIAL_PRODUCTS);
@@ -56,6 +73,47 @@ export default function App() {
     setTimeout(() => {
       setToastMessage(null);
     }, 3200);
+  };
+
+  const handleRegisterShop = (newShop: ShopProfile, ownerUser: StaffMember) => {
+    setCurrentShop(newShop);
+    // Add owner if not existing
+    setStaffList((prev) => [ownerUser, ...prev.filter((s) => s.role !== 'Owner')]);
+    setCurrentUser(ownerUser);
+    setActiveTab('auth-store');
+  };
+
+  const handleLoginSuccess = (user: StaffMember) => {
+    setCurrentUser(user);
+    // Route by role appropriately
+    if (user.role === 'Cashier') {
+      setActiveTab('pos-billing');
+    } else if (user.role === 'Helper') {
+      setActiveTab('forum');
+    } else if (user.role === 'Manager') {
+      setActiveTab('inventory');
+    } else {
+      setActiveTab('auth-store');
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    showToast('Logged out of shop console. Returned to Gateway.');
+  };
+
+  const handleRoleChange = (role: StaffMember['role']) => {
+    const targetUser = staffList.find((s) => s.role === role) || {
+      id: `staff-${Date.now()}`,
+      name: `Active ${role}`,
+      email: `${role.toLowerCase()}@greenharvest.io`,
+      role,
+      shift: 'Flexible Shift',
+      status: 'On Duty',
+      initials: role.substring(0, 2).toUpperCase()
+    };
+    setCurrentUser(targetUser);
+    showToast(`Switched active session to ${targetUser.name} (${targetUser.role}).`);
   };
 
   const handleTabChange = (tab: string) => {
@@ -89,7 +147,6 @@ export default function App() {
   };
 
   const handleConfirmInwardStock = (poNumber: string, sku: string, units: number) => {
-    // 1. Update order status
     setOrders((prev) =>
       prev.map((o) =>
         o.poNumber === poNumber
@@ -102,7 +159,6 @@ export default function App() {
       )
     );
 
-    // 2. Credit inventory
     setProducts((prev) =>
       prev.map((p) => {
         if (p.sku === sku) {
@@ -130,7 +186,7 @@ export default function App() {
     postId: string,
     content: string,
     author: string,
-    role: RoleType
+    role: StaffMember['role']
   ) => {
     setForumPosts((prev) =>
       prev.map((p) => {
@@ -201,7 +257,6 @@ export default function App() {
     paymentMethod: 'UPI' | 'Cash' | 'Card',
     cashierName: string
   ) => {
-    // 1. Record sale transaction
     const newTxn: SalesTransaction = {
       id: `TXN-${Math.floor(100000 + Math.random() * 900000)}`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -221,7 +276,6 @@ export default function App() {
     };
     setTransactions((prev) => [newTxn, ...prev]);
 
-    // 2. Decrement stock in real-time
     setProducts((prev) =>
       prev.map((p) => {
         const cartItem = items.find((ci) => ci.product.sku === p.sku);
@@ -249,12 +303,10 @@ export default function App() {
     const txn = transactions.find((t) => t.id === txnId);
     if (!txn || txn.status === 'Refunded') return;
 
-    // 1. Mark transaction as Refunded
     setTransactions((prev) =>
       prev.map((t) => (t.id === txnId ? { ...t, status: 'Refunded' } : t))
     );
 
-    // 2. Restore units back to inventory
     setProducts((prev) =>
       prev.map((p) => {
         const returnedItem = txn.items.find((item) => item.sku === p.sku);
@@ -279,14 +331,57 @@ export default function App() {
   const criticalSkusCount = products.filter((p) => p.status === 'critical').length;
   const currentDetailProduct = products.find((p) => p.sku === selectedSkuForDetail);
 
+  // If NOT authenticated, show the Login / Register Gateway First!
+  if (!currentUser) {
+    return (
+      <>
+        <LoginGatewayScreen
+          currentShop={currentShop}
+          staffList={staffList}
+          onRegisterShop={handleRegisterShop}
+          onLoginSuccess={handleLoginSuccess}
+          onOpenDbSchema={() => setIsDbSchemaOpen(true)}
+          onShowToast={showToast}
+        />
+        <DbSchemaModal
+          isOpen={isDbSchemaOpen}
+          onClose={() => setIsDbSchemaOpen(false)}
+          onShowToast={showToast}
+        />
+        {toastMessage && (
+          <div className="fixed top-6 left-4 right-4 max-w-md mx-auto z-50 bg-[#0b1c30] text-white px-4 py-3 rounded-xl shadow-xl flex items-center justify-between border border-[#213145] animate-in fade-in duration-200">
+            <div className="flex items-center gap-2.5">
+              <span className="material-symbols-outlined text-[#85f8c4] text-[20px]">
+                check_circle
+              </span>
+              <span className="text-[13px] font-medium">{toastMessage}</span>
+            </div>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="text-white/70 hover:text-white ml-2 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // Once authenticated: Render the full shop console with active role privileges
   return (
     <div className="bg-[#f8f9ff] min-h-screen text-[#0b1c30] flex flex-col font-sans antialiased selection:bg-[#dce1ff] selection:text-[#001551]">
       {/* Top Header */}
       <Header
         currentTab={activeTab}
-        activeRole={activeRole}
-        onRoleChange={setActiveRole}
+        activeRole={currentUser.role}
+        currentUser={currentUser}
+        currentShop={currentShop}
+        staffList={staffList}
+        onRoleChange={handleRoleChange}
         onOpenNotifications={() => setIsNotificationsOpen(true)}
+        onOpenDbSchema={() => setIsDbSchemaOpen(true)}
+        onLogout={handleLogout}
         notificationCount={criticalSkusCount}
       />
 
@@ -295,10 +390,10 @@ export default function App() {
         {activeTab === 'auth-store' && (
           <AuthStoreScreen
             staffList={staffList}
-            activeRole={activeRole}
+            activeRole={currentUser.role}
             onAddStaff={handleAddStaff}
             onRemoveStaff={handleRemoveStaff}
-            onSwitchRole={setActiveRole}
+            onSwitchRole={handleRoleChange}
             onShowToast={showToast}
           />
         )}
@@ -307,7 +402,7 @@ export default function App() {
           <RestockSuppliersScreen
             products={products}
             orders={orders}
-            activeRole={activeRole}
+            activeRole={currentUser.role}
             onApprovePO={handleApprovePO}
             onConfirmInwardStock={handleConfirmInwardStock}
             onSelectProductDetail={handleSelectProductDetail}
@@ -328,7 +423,7 @@ export default function App() {
         {activeTab === 'inventory' && (
           <InventoryScreen
             products={products}
-            activeRole={activeRole}
+            activeRole={currentUser.role}
             onSelectProduct={handleSelectProductDetail}
             onUpdateStock={handleUpdateStock}
             onAddProduct={handleAddProduct}
@@ -341,7 +436,7 @@ export default function App() {
         {activeTab === 'pos-billing' && (
           <PosBillingScreen
             products={products}
-            activeRole={activeRole}
+            activeRole={currentUser.role}
             transactions={transactions}
             recommendations={recommendations}
             onCompleteSale={handleCompleteSale}
@@ -353,7 +448,7 @@ export default function App() {
         {activeTab === 'forum' && (
           <ForumScreen
             posts={forumPosts}
-            activeRole={activeRole}
+            activeRole={currentUser.role}
             onAddPost={handleAddForumPost}
             onAddReply={handleAddReply}
             onToggleResolve={handleToggleResolve}
@@ -365,7 +460,7 @@ export default function App() {
           <AnalyticsScreen
             products={products}
             recommendations={recommendations}
-            activeRole={activeRole}
+            activeRole={currentUser.role}
             onAddRecommendation={handleAddRecommendation}
             onNavigateToRestock={() => handleTabChange('restock-suppliers')}
             onNavigateToPos={() => handleTabChange('pos-billing')}
@@ -405,6 +500,13 @@ export default function App() {
         onClose={() => setIsNotificationsOpen(false)}
         onNavigateToRestock={() => handleTabChange('restock-suppliers')}
         onNavigateToDetail={() => handleSelectProductDetail('SKU-103')}
+      />
+
+      {/* Database Schema & Compass Modal */}
+      <DbSchemaModal
+        isOpen={isDbSchemaOpen}
+        onClose={() => setIsDbSchemaOpen(false)}
+        onShowToast={showToast}
       />
     </div>
   );

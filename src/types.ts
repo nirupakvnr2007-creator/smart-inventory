@@ -1,16 +1,30 @@
 export type RoleType = 'Owner' | 'Manager' | 'Cashier' | 'Helper';
 
-export interface StaffMember {
+export interface ShopProfile {
+  id: string;
+  name: string;
+  ownerName: string;
+  phone: string;
+  email: string;
+  tenantCode: string;
+  cluster: string;
+  databaseName: string;
+}
+
+export interface UserAccount {
   id: string;
   name: string;
   email: string;
   role: RoleType;
+  phone?: string;
+  pinCode?: string;
   shift: string;
   status: 'On Duty' | 'Break / Standby' | 'Off Duty';
   initials: string;
-  phone?: string;
-  pinCode?: string;
+  shopId?: string;
 }
+
+export type StaffMember = UserAccount;
 
 export interface ProductItem {
   id: string;

@@ -1,19 +1,29 @@
 import React, { useState } from 'react';
-import { RoleType } from '../types';
+import { RoleType, StaffMember, ShopProfile } from '../types';
 
 interface HeaderProps {
   currentTab: string;
   activeRole: RoleType;
+  currentUser: StaffMember;
+  currentShop: ShopProfile;
+  staffList: StaffMember[];
   onRoleChange: (role: RoleType) => void;
   onOpenNotifications: () => void;
+  onOpenDbSchema: () => void;
+  onLogout: () => void;
   notificationCount: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentTab,
   activeRole,
+  currentUser,
+  currentShop,
+  staffList,
   onRoleChange,
   onOpenNotifications,
+  onOpenDbSchema,
+  onLogout,
   notificationCount
 }) => {
   const [showRoleMenu, setShowRoleMenu] = useState(false);
@@ -21,15 +31,15 @@ export const Header: React.FC<HeaderProps> = ({
   const getSectionTitle = (tab: string) => {
     switch (tab) {
       case 'auth-store':
-        return 'Auth & Staff Management';
+        return 'Shop Management';
       case 'inventory':
-        return 'Inventory & QR Catalog';
+        return 'Inventory & Packaging QR';
       case 'restock-suppliers':
         return 'Restock & Suppliers';
       case 'pos-billing':
         return 'POS Counter Billing';
       case 'forum':
-        return 'Shop Discussion Forum';
+        return 'Floor Operations Forum';
       case 'analytics-ai':
         return 'Sales & AI Recommendations';
       case 'sku-detail':
@@ -38,15 +48,6 @@ export const Header: React.FC<HeaderProps> = ({
         return 'Shop Console';
     }
   };
-
-  const roles: { role: RoleType; label: string; name: string }[] = [
-    { role: 'Owner', label: 'Owner (Full Access & Business Insights)', name: 'Dr. Maya Chen' },
-    { role: 'Manager', label: 'Manager (Catalog, Stock & Restock Approval)', name: 'Ananya Kapoor' },
-    { role: 'Cashier', label: 'Cashier (Billing, Sales & Receipt Archive)', name: 'Rahul Joshi' },
-    { role: 'Helper', label: 'Helper (View Sales Trends, Shelves & Forum)', name: 'Siddharth Varma' }
-  ];
-
-  const currentRoleInfo = roles.find((r) => r.role === activeRole) || roles[0];
 
   return (
     <header className="fixed top-0 inset-x-0 z-40 bg-white/95 backdrop-blur-xl pt-safe shadow-[0_1px_8px_rgba(0,0,0,0.04)] border-b border-[#e5eeff]">
@@ -63,20 +64,30 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="font-headline font-semibold text-[16px] text-[#0b1c30] leading-none tracking-tight">
                 Smart Inventory Assistant
               </span>
-              <span className="text-[12px] text-[#565e74] leading-tight mt-1 font-medium">
-                Mepco Retail Hub • GreenHarvest
+              <span className="text-[12px] text-[#565e74] leading-tight mt-1 font-medium truncate max-w-[200px]">
+                {currentShop.name} • {currentUser.name}
               </span>
             </div>
           </div>
 
           {/* Action and Role controls */}
-          <div className="flex items-center gap-2">
-            {/* Interactive Role Switcher for testing RBAC */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Database Schema Button */}
+            <button
+              onClick={onOpenDbSchema}
+              className="px-2.5 py-1 rounded-lg bg-[#eff4ff] border border-[#dae2fd] text-[#0037b0] text-[11px] font-bold hover:bg-[#dce1ff] transition-colors cursor-pointer flex items-center gap-1"
+              title="View MongoDB Compass Collections Schema"
+            >
+              <span className="material-symbols-outlined text-[15px]">database</span>
+              <span className="hidden sm:inline">DB Tables</span>
+            </button>
+
+            {/* Interactive Role Switcher dropdown */}
             <div className="relative">
               <button
                 onClick={() => setShowRoleMenu(!showRoleMenu)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#dae2fd] text-[#131b2e] text-[12px] font-bold hover:bg-[#bec6e0] transition-colors cursor-pointer border border-[#c4c5d7]/50"
-                title="Switch active role to test RBAC permissions"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#dae2fd] text-[#131b2e] text-[11px] font-bold hover:bg-[#bec6e0] transition-colors cursor-pointer border border-[#c4c5d7]/50"
+                title="Switch employee role account"
               >
                 <span className="w-2 h-2 rounded-full bg-[#0037b0]"></span>
                 <span>{activeRole}</span>
@@ -88,34 +99,41 @@ export const Header: React.FC<HeaderProps> = ({
               {showRoleMenu && (
                 <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-2xl border border-[#dae2fd] p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-2 py-1 text-[10px] font-bold text-[#747686] uppercase tracking-wider">
-                    Simulate Shop Role (RBAC)
+                    Switch Active Member (RBAC)
                   </div>
-                  {roles.map((r) => (
+                  {staffList.map((s) => (
                     <button
-                      key={r.role}
+                      key={s.id}
                       onClick={() => {
-                        onRoleChange(r.role);
+                        onRoleChange(s.role);
                         setShowRoleMenu(false);
                       }}
                       className={`w-full text-left p-2 rounded-lg text-[12px] transition-colors flex flex-col cursor-pointer ${
-                        activeRole === r.role
+                        currentUser.id === s.id
                           ? 'bg-[#dce1ff] text-[#001551] font-bold'
                           : 'text-[#434655] hover:bg-[#eff4ff]'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-semibold">{r.role}</span>
-                        {activeRole === r.role && (
-                          <span className="material-symbols-outlined text-[15px] text-[#0037b0]">
-                            check
-                          </span>
-                        )}
+                        <span className="font-semibold">{s.name}</span>
+                        <span className="text-[10px] bg-white px-1.5 py-0.2 rounded border border-[#dae2fd]">
+                          {s.role}
+                        </span>
                       </div>
-                      <span className="text-[11px] opacity-80">{r.name}</span>
+                      <span className="text-[11px] opacity-80">{s.email}</span>
                     </button>
                   ))}
-                  <div className="mt-1 pt-1 border-t border-[#eff4ff] px-2 py-1 text-[10px] text-[#565e74]">
-                    *Permissions dynamically adapt to the active role.
+                  <div className="mt-1 pt-1 border-t border-[#eff4ff]">
+                    <button
+                      onClick={() => {
+                        setShowRoleMenu(false);
+                        onLogout();
+                      }}
+                      className="w-full text-left p-1.5 text-[11px] text-[#ba1a1a] hover:bg-[#ffdad6] rounded font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">logout</span>
+                      <span>Log Out to Login Gateway</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -124,40 +142,37 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Notification bell */}
             <button
               onClick={onOpenNotifications}
-              className="w-10 h-10 flex items-center justify-center text-[#434655] hover:text-[#0b1c30] hover:bg-[#eff4ff] rounded-lg transition-colors relative cursor-pointer"
+              className="w-9 h-9 flex items-center justify-center text-[#434655] hover:text-[#0b1c30] hover:bg-[#eff4ff] rounded-lg transition-colors relative cursor-pointer"
               aria-label="Notifications"
             >
-              <span className="material-symbols-outlined text-[22px]">
+              <span className="material-symbols-outlined text-[20px]">
                 notifications
               </span>
               {notificationCount > 0 && (
-                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#ba1a1a] ring-2 ring-white"></span>
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#ba1a1a] ring-2 ring-white"></span>
               )}
             </button>
 
-            {/* Profile Avatar with user initials */}
-            <div
-              className="w-8 h-8 rounded-full bg-[#0037b0] text-white flex items-center justify-center shrink-0 shadow-xs font-headline font-bold text-xs"
-              title={`${currentRoleInfo.name} (${activeRole})`}
+            {/* Log Out Button */}
+            <button
+              onClick={onLogout}
+              className="w-9 h-9 flex items-center justify-center text-[#565e74] hover:text-[#ba1a1a] hover:bg-[#ffdad6]/40 rounded-lg transition-colors cursor-pointer"
+              title="Log Out to Login Page"
             >
-              {currentRoleInfo.name
-                .split(' ')
-                .map((n) => n[0])
-                .join('')
-                .substring(0, 2)}
-            </div>
+              <span className="material-symbols-outlined text-[20px]">logout</span>
+            </button>
           </div>
         </div>
 
-        {/* Sub-bar with DB connection status and active section title */}
+        {/* Sub-bar with DB connection status */}
         <div className="flex items-center justify-between pt-1 mt-0.5">
           <div className="flex items-center gap-1.5 overflow-hidden">
             <span className="w-2 h-2 rounded-full bg-[#059669] shrink-0 animate-pulse"></span>
-            <span className="text-[12px] text-[#004f35] font-medium truncate max-w-[230px]">
-              Connected: retail_hub_db / Cluster0
+            <span className="text-[11px] text-[#004f35] font-medium truncate max-w-[240px]">
+              MongoDB: localhost:27017/smart_inventory
             </span>
           </div>
-          <div className="text-[11px] text-[#434655] uppercase font-bold tracking-wider">
+          <div className="text-[10px] text-[#434655] uppercase font-bold tracking-wider">
             {getSectionTitle(currentTab)}
           </div>
         </div>
