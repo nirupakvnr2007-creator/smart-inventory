@@ -6,8 +6,6 @@ interface HeaderProps {
   activeRole: RoleType;
   currentUser: UserAccount;
   currentShop: ShopProfile;
-  staffList: UserAccount[];
-  onRoleChange: (role: RoleType) => void;
   onOpenNotifications: () => void;
   onLogout: () => void;
   notificationCount: number;
@@ -18,36 +16,11 @@ export const Header: React.FC<HeaderProps> = ({
   activeRole,
   currentUser,
   currentShop,
-  staffList,
-  onRoleChange,
   onOpenNotifications,
   onLogout,
   notificationCount
 }) => {
-  const [showRoleMenu, setShowRoleMenu] = useState(false);
-
-  const getSectionTitle = (tab: string) => {
-    switch (tab) {
-      case 'members':
-      case 'auth-store':
-        return 'Shop Management';
-      case 'inventory':
-        return 'Product Inventory';
-      case 'restock':
-      case 'restock-suppliers':
-        return 'Supplier Restock';
-      case 'pos-billing':
-      case 'billing':
-        return 'POS Counter Billing';
-      case 'forum':
-        return 'Team Discussion Forum';
-      case 'dashboard':
-      case 'analytics-ai':
-        return 'Sales Trends & Dashboard';
-      default:
-        return 'Shop Console';
-    }
-  };
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   return (
     <header className="fixed top-0 inset-x-0 z-40 bg-white/95 backdrop-blur-xl pt-safe shadow-[0_1px_8px_rgba(0,0,0,0.04)] border-b border-[#e5eeff]">
@@ -70,68 +43,51 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Action and Role controls */}
+          {/* User controls (Strictly no role switching allowed!) */}
           <div className="flex items-center gap-2">
-            {/* Active Role Switcher / Profile */}
+            {/* Logged in User Profile Chip */}
             <div className="relative">
               <button
-                onClick={() => setShowRoleMenu(!showRoleMenu)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#eff4ff] text-[#0037b0] text-[11px] font-bold hover:bg-[#dce1ff] transition-colors cursor-pointer border border-[#dae2fd]"
-                title="Account details"
+                onClick={() => setShowProfileModal(!showProfileModal)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#eff4ff] text-[#0037b0] text-[11px] font-bold hover:bg-[#dce1ff] transition-colors cursor-pointer border border-[#dae2fd]"
+                title="View My Profile"
               >
                 <span className="w-2 h-2 rounded-full bg-[#0037b0]"></span>
                 <span>{currentUser.role}</span>
-                <span className="material-symbols-outlined text-[14px]">
-                  arrow_drop_down
-                </span>
+                <span className="material-symbols-outlined text-[15px]">account_circle</span>
               </button>
 
-              {showRoleMenu && (
-                <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-xl shadow-2xl border border-[#dae2fd] p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-2 py-1 text-[10px] font-bold text-[#747686] uppercase tracking-wider">
-                    Logged in account
+              {showProfileModal && (
+                <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-2xl border border-[#dae2fd] p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-1 pb-1.5 text-[10px] font-bold text-[#747686] uppercase tracking-wider">
+                    My Account Profile
                   </div>
-                  <div className="p-2 bg-[#f8f9ff] rounded-lg border border-[#dae2fd] space-y-0.5 mb-2">
+                  <div className="p-2.5 bg-[#f8f9ff] rounded-lg border border-[#dae2fd] space-y-1 mb-2">
                     <p className="text-[13px] font-bold text-[#0b1c30]">{currentUser.name}</p>
                     <p className="text-[11px] text-[#565e74] truncate">{currentUser.email}</p>
-                    <span className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-[#dce1ff] text-[#0039b5]">
-                      Role: {currentUser.role}
-                    </span>
+                    {currentUser.phone && (
+                      <p className="text-[11px] text-[#565e74]">{currentUser.phone}</p>
+                    )}
+                    <div className="pt-1">
+                      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#dce1ff] text-[#0039b5]">
+                        Assigned Role: {currentUser.role}
+                      </span>
+                    </div>
                   </div>
 
-                  {/* Switch between created accounts if any other members exist */}
-                  {staffList.filter((s) => s.id !== currentUser.id).length > 0 && (
-                    <div className="space-y-1 mb-2">
-                      <div className="px-2 py-0.5 text-[10px] font-bold text-[#747686] uppercase tracking-wider">
-                        Switch Registered Member
-                      </div>
-                      {staffList
-                        .filter((s) => s.id !== currentUser.id)
-                        .map((s) => (
-                          <button
-                            key={s.id}
-                            onClick={() => {
-                              onRoleChange(s.role);
-                              setShowRoleMenu(false);
-                            }}
-                            className="w-full text-left p-1.5 rounded-lg text-[11px] hover:bg-[#eff4ff] text-[#0b1c30] flex items-center justify-between cursor-pointer"
-                          >
-                            <span className="truncate">{s.name}</span>
-                            <span className="text-[10px] text-[#565e74] font-bold">{s.role}</span>
-                          </button>
-                        ))}
-                    </div>
-                  )}
+                  <p className="text-[10px] text-[#565e74] px-1 pb-2">
+                    Role switching is restricted. To switch accounts, sign out and enter the credentials for that account.
+                  </p>
 
-                  <div className="pt-1 border-t border-[#eff4ff]">
+                  <div className="pt-2 border-t border-[#eff4ff]">
                     <button
                       onClick={() => {
-                        setShowRoleMenu(false);
+                        setShowProfileModal(false);
                         onLogout();
                       }}
-                      className="w-full text-left p-1.5 text-[11px] text-[#ba1a1a] hover:bg-[#ffdad6] rounded font-bold flex items-center gap-1 cursor-pointer"
+                      className="w-full text-center py-2 px-3 text-[12px] text-white bg-[#ba1a1a] hover:bg-[#93000a] rounded-lg font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
                     >
-                      <span className="material-symbols-outlined text-[14px]">logout</span>
+                      <span className="material-symbols-outlined text-[16px]">logout</span>
                       <span>Sign Out</span>
                     </button>
                   </div>
@@ -154,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            {/* Log Out Button */}
+            {/* Direct Sign Out Button */}
             <button
               onClick={onLogout}
               className="w-8 h-8 flex items-center justify-center text-[#565e74] hover:text-[#ba1a1a] hover:bg-[#ffdad6]/40 rounded-lg transition-colors cursor-pointer"

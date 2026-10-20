@@ -68,6 +68,7 @@ export interface SalesTransaction {
   timestamp: string;
   cashierName: string;
   cashierEmail: string;
+  customerPhone: string;
   items: SalesItem[];
   subtotal: number;
   tax: number;

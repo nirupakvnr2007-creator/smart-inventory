@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { NotificationDrawer } from './components/NotificationDrawer';
@@ -8,7 +8,21 @@ import { ManagerProductsScreen } from './components/screens/ManagerProductsScree
 import { PosBillingScreen } from './components/screens/PosBillingScreen';
 import { SalesTrendDashboard } from './components/screens/SalesTrendDashboard';
 import { ForumScreen } from './components/screens/ForumScreen';
-import { CustomerFeedbackModal } from './components/screens/CustomerFeedbackModal';
+import { PublicCustomerFeedbackScreen } from './components/screens/PublicCustomerFeedbackScreen';
+import {
+  fetchServerData,
+  apiSaveShop,
+  apiSaveUser,
+  apiDeleteUser,
+  apiSaveProduct,
+  apiUpdateProductStock,
+  apiDeleteProduct,
+  apiSaveTransaction,
+  apiUpdateRestockStatus,
+  apiSaveForumPost,
+  apiSaveReply,
+  apiSaveReview
+} from './services/api';
 import {
   loadStoredData,
   saveShop,
@@ -27,12 +41,11 @@ import {
   SalesTransaction,
   SalesItem,
   ForumPost,
-  CustomerReview,
-  RoleType
+  CustomerReview
 } from './types';
 
 export default function App() {
-  // Load data from persistent local storage
+  // Load initial fallback from local storage
   const [initialData] = useState(() => loadStoredData());
 
   const [currentShop, setCurrentShop] = useState<ShopProfile | null>(initialData.shop);
@@ -47,27 +60,59 @@ export default function App() {
   const [forumPosts, setForumPosts] = useState<ForumPost[]>(initialData.forumPosts);
   const [reviews, setReviews] = useState<CustomerReview[]>(initialData.reviews);
 
-  // Authentication & Active Session State
+  // Authentication State
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
 
   // Active Tab View
   const [activeTab, setActiveTab] = useState<string>('members');
 
-  // Modals
+  // Modals & Public Feedback Route
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [feedbackModalProduct, setFeedbackModalProduct] = useState<ProductItem | null>(null);
+  const [activeFeedbackProductId, setActiveFeedbackProductId] = useState<string | null>(null);
 
-  // Toast notification state
+  // Toast Notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const showToast = (message: string) => {
+  const showToast = useCallback((message: string) => {
     setToastMessage(message);
     setTimeout(() => {
       setToastMessage(null);
     }, 3500);
-  };
+  }, []);
 
-  // Persist data whenever state changes
+  // Multi-device synchronization: Fetch server data on mount and periodically
+  const syncWithServer = useCallback(async () => {
+    const serverData = await fetchServerData();
+    if (serverData) {
+      if (serverData.shop) setCurrentShop(serverData.shop);
+      if (Array.isArray(serverData.users)) setUsers(serverData.users);
+      if (Array.isArray(serverData.products)) setProducts(serverData.products);
+      if (Array.isArray(serverData.restockRequests)) setRestockRequests(serverData.restockRequests);
+      if (Array.isArray(serverData.transactions)) setTransactions(serverData.transactions);
+      if (Array.isArray(serverData.forumPosts)) setForumPosts(serverData.forumPosts);
+      if (Array.isArray(serverData.reviews)) setReviews(serverData.reviews);
+    }
+  }, []);
+
+  useEffect(() => {
+    syncWithServer();
+    // Sync every 8 seconds for multi-device live data
+    const interval = setInterval(syncWithServer, 8000);
+    return () => clearInterval(interval);
+  }, [syncWithServer]);
+
+  // Check URL query parameters for QR code scanning (?feedback=<productId>)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const feedbackId = params.get('feedback');
+      if (feedbackId) {
+        setActiveFeedbackProductId(feedbackId);
+      }
+    }
+  }, []);
+
+  // Sync to local storage backup
   useEffect(() => {
     saveShop(currentShop);
   }, [currentShop]);
@@ -96,59 +141,22 @@ export default function App() {
     saveReviews(reviews);
   }, [reviews]);
 
-  // Automatic restock verification: check if any product dropped to or below threshold
-  const triggerThresholdRestockCheck = (
-    currentProds: ProductItem[],
-    currentReqs: RestockRequest[]
-  ) => {
-    const updatedReqs = [...currentReqs];
-    let newlyCreated = 0;
-
-    currentProds.forEach((prod) => {
-      if (prod.availableStock <= prod.minThreshold) {
-        const hasPending = updatedReqs.some(
-          (r) => r.productId === prod.id && r.status === 'Pending'
-        );
-        if (!hasPending) {
-          updatedReqs.unshift({
-            id: `req-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            productId: prod.id,
-            productName: prod.name,
-            brand: prod.brand,
-            currentStock: prod.availableStock,
-            minThreshold: prod.minThreshold,
-            requestedQuantity: prod.minThreshold,
-            supplierName: prod.supplierName,
-            supplierEmail: prod.supplierEmail,
-            supplierPhone: prod.supplierPhone,
-            status: 'Pending',
-            createdAt: new Date().toISOString()
-          });
-          newlyCreated++;
-        }
-      }
-    });
-
-    if (newlyCreated > 0) {
-      setRestockRequests(updatedReqs);
-      showToast(
-        `Restock Alert: ${newlyCreated} product(s) dropped below minimum threshold. Automated PO request generated for Manager.`
-      );
-    }
-  };
-
-  // Handlers for Shop Registration & User Login
-  const handleRegisterShop = (newShop: ShopProfile, owner: UserAccount) => {
+  // Handle Shop Registration & User Login
+  const handleRegisterShop = async (newShop: ShopProfile, owner: UserAccount) => {
     setCurrentShop(newShop);
     const updatedUsers = [owner, ...users.filter((u) => u.email !== owner.email)];
     setUsers(updatedUsers);
     setCurrentUser(owner);
     setActiveTab('members');
+
+    // Save to server database immediately
+    await apiSaveShop(newShop);
+    await apiSaveUser(owner);
   };
 
   const handleLoginSuccess = (user: UserAccount) => {
     setCurrentUser(user);
-    // Route by role
+    // Route to appropriate initial screen based on assigned role
     switch (user.role) {
       case 'Helper':
         setActiveTab('dashboard');
@@ -171,61 +179,68 @@ export default function App() {
     showToast('Signed out of shop account.');
   };
 
-  const handleRoleChange = (role: RoleType) => {
-    const matching = users.find((u) => u.role === role);
-    if (matching) {
-      setCurrentUser(matching);
-      showToast(`Switched active profile to ${matching.name} (${matching.role}).`);
-      if (role === 'Helper' && (activeTab === 'inventory' || activeTab === 'billing' || activeTab === 'members')) {
-        setActiveTab('dashboard');
-      } else if (role === 'Cashier' && activeTab === 'members') {
-        setActiveTab('billing');
-      }
-    } else {
-      showToast(`No registered account found with role ${role}.`);
-    }
-  };
-
   // Owner Member Management Handlers
-  const handleAddMember = (newMember: UserAccount) => {
+  const handleAddMember = async (newMember: UserAccount) => {
     setUsers((prev) => [newMember, ...prev]);
+    await apiSaveUser(newMember);
   };
 
-  const handleTerminateMember = (memberId: string) => {
+  const handleTerminateMember = async (memberId: string) => {
     setUsers((prev) => prev.filter((u) => u.id !== memberId));
+    await apiDeleteUser(memberId);
   };
 
   // Manager Product Management Handlers
-  const handleAddProduct = (newProduct: ProductItem) => {
+  const handleAddProduct = async (newProduct: ProductItem) => {
     const nextProducts = [newProduct, ...products];
     setProducts(nextProducts);
-    // Check if new product was added with initial stock below threshold
-    triggerThresholdRestockCheck(nextProducts, restockRequests);
+    await apiSaveProduct(newProduct);
   };
 
-  const handleRemoveProduct = (productId: string) => {
+  const handleRemoveProduct = async (productId: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== productId));
     setRestockRequests((prev) => prev.filter((r) => r.productId !== productId));
+    await apiDeleteProduct(productId);
   };
 
-  // Restock Approval: marks approved and opens supplier mail
-  const handleApproveRestock = (request: RestockRequest) => {
+  // Manager Stock Edit Handler (Feature: Option for manager to edit stock upon approval or anytime)
+  const handleUpdateStock = async (productId: string, newStock: number) => {
+    setProducts((prev) =>
+      prev.map((p) => (p.id === productId ? { ...p, availableStock: newStock } : p))
+    );
+
+    // If stock now exceeds threshold, resolve pending restock requests
+    setRestockRequests((prev) =>
+      prev.map((r) => {
+        if (r.productId === productId && newStock > r.minThreshold) {
+          return { ...r, status: 'Approved' };
+        }
+        return r;
+      })
+    );
+
+    await apiUpdateProductStock(productId, newStock);
+  };
+
+  // Restock Approval Handler: marks approved and opens supplier mail
+  const handleApproveRestock = async (request: RestockRequest) => {
     setRestockRequests((prev) =>
       prev.map((r) => (r.id === request.id ? { ...r, status: 'Approved' } : r))
     );
+    await apiUpdateRestockStatus(request.id, 'Approved');
   };
 
-  // Cashier POS Billing Handlers: Updates DB stock and generates restock requests
-  const handleCompleteSale = (
+  // Cashier POS Billing Handler: records customer phone number and updates DB stock
+  const handleCompleteSale = async (
     items: SalesItem[],
     subtotal: number,
     tax: number,
     total: number,
     paymentMethod: 'Cash' | 'UPI' | 'Card',
+    customerPhone: string,
     cashierName: string,
     cashierEmail: string
   ) => {
-    // 1. Record transaction in DB
     const receiptNum = `REC-${Math.floor(100000 + Math.random() * 900000)}`;
     const newTxn: SalesTransaction = {
       id: `txn-${Date.now()}`,
@@ -233,6 +248,7 @@ export default function App() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       cashierName,
       cashierEmail,
+      customerPhone,
       items,
       subtotal,
       tax,
@@ -242,9 +258,9 @@ export default function App() {
 
     setTransactions((prev) => [newTxn, ...prev]);
 
-    // 2. Decrement available stock in DB
+    // Decrement available stock in local state
     const updatedProducts = products.map((p) => {
-      const billed = items.find((i) => i.productId === p.id);
+      const billed = items.find((i) => i.productId === p.id || i.sku === p.sku);
       if (billed) {
         return {
           ...p,
@@ -256,31 +272,34 @@ export default function App() {
 
     setProducts(updatedProducts);
 
-    // 3. Automatically check if any product dropped below minimum threshold
-    triggerThresholdRestockCheck(updatedProducts, restockRequests);
+    // Save transaction and decrement stock on server database
+    await apiSaveTransaction(newTxn);
+    syncWithServer();
   };
 
   // Forum Handlers
-  const handleAddForumPost = (post: ForumPost) => {
+  const handleAddForumPost = async (post: ForumPost) => {
     setForumPosts((prev) => [post, ...prev]);
+    await apiSaveForumPost(post);
   };
 
-  const handleAddReply = (
+  const handleAddReply = async (
     postId: string,
     content: string,
     authorName: string,
-    authorRole: RoleType
+    authorRole: UserAccount['role']
   ) => {
+    const newReply = {
+      id: `rep-${Date.now()}`,
+      authorName,
+      authorRole,
+      content,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
     setForumPosts((prev) =>
       prev.map((p) => {
         if (p.id === postId) {
-          const newReply = {
-            id: `rep-${Date.now()}`,
-            authorName,
-            authorRole,
-            content,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          };
           return {
             ...p,
             replies: [...(p.replies || []), newReply]
@@ -289,16 +308,42 @@ export default function App() {
         return p;
       })
     );
+
+    await apiSaveReply(postId, newReply);
   };
 
-  // Reviews
-  const handleAddReview = (review: CustomerReview) => {
+  // Customer Reviews Handlers
+  const handleAddReview = async (review: CustomerReview) => {
     setReviews((prev) => [review, ...prev]);
+    await apiSaveReview(review);
+  };
+
+  const handleCloseFeedbackPage = () => {
+    setActiveFeedbackProductId(null);
+    if (typeof window !== 'undefined' && window.location.search) {
+      window.history.pushState({}, '', window.location.pathname);
+    }
   };
 
   const criticalCount = products.filter((p) => p.availableStock <= p.minThreshold).length;
 
-  // 1. IF NOT LOGGED IN: Open Login & Registration Gateway first!
+  // 1. PUBLIC ROUTE: Customer scans packaging QR code or opens ?feedback=<productId>
+  if (activeFeedbackProductId) {
+    return (
+      <PublicCustomerFeedbackScreen
+        productId={activeFeedbackProductId}
+        products={products}
+        shop={currentShop}
+        transactions={transactions}
+        reviews={reviews}
+        onAddReview={handleAddReview}
+        onClose={handleCloseFeedbackPage}
+        onShowToast={showToast}
+      />
+    );
+  }
+
+  // 2. AUTHENTICATION GATEWAY: If not signed in, show Login & Register first!
   if (!currentUser) {
     return (
       <>
@@ -329,24 +374,24 @@ export default function App() {
     );
   }
 
-  // 2. ONCE LOGGED IN: Render full shop management interface by role
+  // 3. AUTHENTICATED SHOP CONSOLE: Strictly by user's assigned role
   return (
     <div className="bg-[#f8f9ff] min-h-screen text-[#0b1c30] flex flex-col font-sans antialiased selection:bg-[#dce1ff] selection:text-[#001551]">
-      {/* Top Header */}
+      {/* Top Header (Strictly without profile switching) */}
       <Header
         currentTab={activeTab}
         activeRole={currentUser.role}
         currentUser={currentUser}
-        currentShop={currentShop || {
-          id: 'shop-01',
-          name: 'My Retail Shop',
-          ownerName: currentUser.name,
-          phone: '',
-          email: currentUser.email,
-          createdAt: new Date().toISOString()
-        }}
-        staffList={users}
-        onRoleChange={handleRoleChange}
+        currentShop={
+          currentShop || {
+            id: 'shop-01',
+            name: 'My Retail Shop',
+            ownerName: currentUser.name,
+            phone: '',
+            email: currentUser.email,
+            createdAt: new Date().toISOString()
+          }
+        }
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onLogout={handleLogout}
         notificationCount={criticalCount}
@@ -357,14 +402,16 @@ export default function App() {
         {/* OWNER: Members Management */}
         {activeTab === 'members' && currentUser.role === 'Owner' && (
           <OwnerMembersScreen
-            currentShop={currentShop || {
-              id: 'shop-01',
-              name: 'My Retail Shop',
-              ownerName: currentUser.name,
-              phone: '',
-              email: currentUser.email,
-              createdAt: new Date().toISOString()
-            }}
+            currentShop={
+              currentShop || {
+                id: 'shop-01',
+                name: 'My Retail Shop',
+                ownerName: currentUser.name,
+                phone: '',
+                email: currentUser.email,
+                createdAt: new Date().toISOString()
+              }
+            }
             users={users}
             currentUser={currentUser}
             onAddMember={handleAddMember}
@@ -373,30 +420,33 @@ export default function App() {
           />
         )}
 
-        {/* MANAGER / OWNER: Product Catalog & Restock Requests */}
+        {/* MANAGER / OWNER: Product Catalog, Stock Editing, Packaging QR & Restock */}
         {(activeTab === 'inventory' || activeTab === 'restock') &&
           (currentUser.role === 'Manager' || currentUser.role === 'Owner') && (
             <ManagerProductsScreen
               products={products}
               restockRequests={restockRequests}
-              currentShop={currentShop || {
-                id: 'shop-01',
-                name: 'My Retail Shop',
-                ownerName: currentUser.name,
-                phone: '',
-                email: currentUser.email,
-                createdAt: new Date().toISOString()
-              }}
+              currentShop={
+                currentShop || {
+                  id: 'shop-01',
+                  name: 'My Retail Shop',
+                  ownerName: currentUser.name,
+                  phone: '',
+                  email: currentUser.email,
+                  createdAt: new Date().toISOString()
+                }
+              }
               activeRole={currentUser.role}
               onAddProduct={handleAddProduct}
               onRemoveProduct={handleRemoveProduct}
+              onUpdateStock={handleUpdateStock}
               onApproveRestock={handleApproveRestock}
-              onShowFeedbackPage={(product) => setFeedbackModalProduct(product)}
+              onShowFeedbackPage={(product) => setActiveFeedbackProductId(product.id)}
               onShowToast={showToast}
             />
           )}
 
-        {/* CASHIER / OWNER: POS Billing Register */}
+        {/* CASHIER / OWNER: POS Billing Register with Mandatory Customer Phone Number */}
         {activeTab === 'billing' &&
           (currentUser.role === 'Cashier' || currentUser.role === 'Owner') && (
             <PosBillingScreen
@@ -405,11 +455,11 @@ export default function App() {
               transactions={transactions}
               onCompleteSale={handleCompleteSale}
               onShowToast={showToast}
-              onShowFeedbackPage={(product) => setFeedbackModalProduct(product)}
+              onShowFeedbackPage={(product) => setActiveFeedbackProductId(product.id)}
             />
           )}
 
-        {/* ALL MEMBERS: Sales Trend Dashboard */}
+        {/* ALL SHOP MEMBERS: Sales Trend Dashboard */}
         {activeTab === 'dashboard' && (
           <SalesTrendDashboard
             transactions={transactions}
@@ -418,7 +468,7 @@ export default function App() {
           />
         )}
 
-        {/* ALL MEMBERS: Discussion Forum */}
+        {/* ALL SHOP MEMBERS: Team Discussion Forum */}
         {activeTab === 'forum' && (
           <ForumScreen
             posts={forumPosts}
@@ -431,7 +481,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Dynamic Role Navigation */}
+      {/* Role Navigation Bar */}
       <Navigation
         activeTab={activeTab}
         onTabChange={(tab) => {
@@ -441,17 +491,6 @@ export default function App() {
         role={currentUser.role}
         criticalCount={criticalCount}
       />
-
-      {/* Customer Packaging QR Feedback Modal */}
-      {feedbackModalProduct && (
-        <CustomerFeedbackModal
-          product={feedbackModalProduct}
-          reviews={reviews}
-          onAddReview={handleAddReview}
-          onClose={() => setFeedbackModalProduct(null)}
-          onShowToast={showToast}
-        />
-      )}
 
       {/* Restock Notification Drawer */}
       <NotificationDrawer

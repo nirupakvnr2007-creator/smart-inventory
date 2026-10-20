@@ -9,6 +9,7 @@ interface ManagerProductsScreenProps {
   activeRole: RoleType;
   onAddProduct: (product: ProductItem) => void;
   onRemoveProduct: (productId: string) => void;
+  onUpdateStock: (productId: string, newStock: number) => void;
   onApproveRestock: (request: RestockRequest) => void;
   onShowFeedbackPage: (product: ProductItem) => void;
   onShowToast: (msg: string) => void;
@@ -21,6 +22,7 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
   activeRole,
   onAddProduct,
   onRemoveProduct,
+  onUpdateStock,
   onApproveRestock,
   onShowFeedbackPage,
   onShowToast
@@ -28,6 +30,10 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
   const [activeTab, setActiveTab] = useState<'catalog' | 'restock'>('catalog');
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedQrProduct, setSelectedQrProduct] = useState<ProductItem | null>(null);
+
+  // Stock Edit Modal State
+  const [stockEditProduct, setStockEditProduct] = useState<ProductItem | null>(null);
+  const [newStockInput, setNewStockInput] = useState<string>('');
 
   // Product Add Form State
   const [name, setName] = useState('');
@@ -45,16 +51,30 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !brand.trim() || !price || !availableStock || !minThreshold || !supplierName.trim() || !supplierEmail.trim()) {
-      onShowToast('Please fill in all required fields (Product Name, Brand, Price, Stock, Threshold, Supplier Info).');
+    if (
+      !name.trim() ||
+      !brand.trim() ||
+      !price ||
+      !availableStock ||
+      !minThreshold ||
+      !supplierName.trim() ||
+      !supplierEmail.trim()
+    ) {
+      onShowToast(
+        'Please fill in all required fields (Product Name, Brand, Price, Stock, Threshold, Supplier Info).'
+      );
       return;
     }
 
+    const prodId = `prod-${Date.now()}`;
     const skuCode = `SKU-${Math.floor(100 + Math.random() * 900)}`;
-    const qrToken = `QR-FEEDBACK-${skuCode}-${Date.now().toString(36).toUpperCase()}`;
+    const qrFeedbackUrl =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/?feedback=${prodId}`
+        : `QR-FEEDBACK-${skuCode}`;
 
     const newProduct: ProductItem = {
-      id: `prod-${Date.now()}`,
+      id: prodId,
       sku: skuCode,
       name: name.trim(),
       brand: brand.trim(),
@@ -65,7 +85,7 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
       supplierName: supplierName.trim(),
       supplierEmail: supplierEmail.trim(),
       supplierPhone: supplierPhone.trim(),
-      qrCode: qrToken,
+      qrCode: qrFeedbackUrl,
       createdAt: new Date().toISOString()
     };
 
@@ -79,7 +99,7 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
     setSupplierName('');
     setSupplierEmail('');
     setSupplierPhone('');
-    onShowToast(`Product "${newProduct.name}" added and QR code generated!`);
+    onShowToast(`Product "${newProduct.name}" added and packaging QR code generated!`);
   };
 
   const handleRemove = (product: ProductItem) => {
@@ -88,7 +108,11 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
       return;
     }
 
-    if (window.confirm(`Are you sure you want to remove "${product.name}" (${product.brand})? This will update the database.`)) {
+    if (
+      window.confirm(
+        `Are you sure you want to remove "${product.name}" (${product.brand})? This will update the database.`
+      )
+    ) {
       onRemoveProduct(product.id);
       onShowToast(`Product "${product.name}" removed from database.`);
     }
@@ -106,6 +130,40 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
     const mailtoUrl = `mailto:${request.supplierEmail}?subject=${subject}&body=${body}`;
     window.open(mailtoUrl, '_blank');
     onShowToast(`Restock request approved! Mail window opened for ${request.supplierEmail}.`);
+
+    // Keep an option for the manager to edit the stock too
+    const prod = products.find((p) => p.id === request.productId);
+    if (prod) {
+      setStockEditProduct(prod);
+      setNewStockInput(String(prod.availableStock));
+    }
+  };
+
+  const handleOpenEditStock = (product: ProductItem) => {
+    setStockEditProduct(product);
+    setNewStockInput(String(product.availableStock));
+  };
+
+  const handleSaveStock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stockEditProduct) return;
+
+    const parsed = parseInt(newStockInput, 10);
+    if (isNaN(parsed) || parsed < 0) {
+      onShowToast('Please enter a valid non-negative stock quantity.');
+      return;
+    }
+
+    onUpdateStock(stockEditProduct.id, parsed);
+    onShowToast(`Stock for "${stockEditProduct.name}" updated to ${parsed} units in database.`);
+    setStockEditProduct(null);
+  };
+
+  const handleCopyQrLink = (url: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url);
+      onShowToast('Feedback URL copied to clipboard!');
+    }
   };
 
   return (
@@ -117,7 +175,7 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
             Product Catalog &amp; Supplier Restock
           </h2>
           <p className="text-[12px] text-[#565e74]">
-            Manage products, generate packaging QR feedback codes, and handle threshold restocking.
+            Manage products, generate packaging QR feedback codes, edit stock quantities, and dispatch supplier restock emails.
           </p>
         </div>
 
@@ -136,7 +194,7 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('restock')}
-              className={`px-3 py-1.5 rounded-md text-[12px] font-bold cursor-pointer transition-colors relative flex items-center gap-1 ${
+              className={`px-3 py-1.5 rounded-md text-[12px] font-bold cursor-pointer transition-colors relative flex items-center gap-1.5 ${
                 activeTab === 'restock'
                   ? 'bg-white text-[#0037b0] shadow-xs'
                   : 'text-[#565e74] hover:text-[#0b1c30]'
@@ -240,7 +298,18 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
                       {/* Stock & Threshold Metrics */}
                       <div className="mt-2.5 p-2.5 bg-[#eff4ff] border border-[#dae2fd] rounded-lg grid grid-cols-2 gap-2 text-[12px]">
                         <div>
-                          <span className="text-[#565e74] text-[11px] block">Available Stock</span>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#565e74] text-[11px]">Available Stock</span>
+                            {isManagerOrOwner && (
+                              <button
+                                onClick={() => handleOpenEditStock(product)}
+                                className="text-[10px] text-[#0037b0] font-bold hover:underline cursor-pointer"
+                                title="Edit Stock Quantity"
+                              >
+                                Edit Stock
+                              </button>
+                            )}
+                          </div>
                           <span
                             className={`font-headline font-bold text-[16px] tabular-nums ${
                               isBelowThreshold ? 'text-[#ba1a1a]' : 'text-[#004f35]'
@@ -270,39 +339,53 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
                           Supplier: <strong>{product.supplierName}</strong>
                         </p>
                         <p>
-                          Email: {product.supplierEmail} {product.supplierPhone ? `• ${product.supplierPhone}` : ''}
+                          Email: {product.supplierEmail}{' '}
+                          {product.supplierPhone ? `• ${product.supplierPhone}` : ''}
                         </p>
                       </div>
                     </div>
 
-                    {/* Bottom Actions: QR Code & Remove */}
-                    <div className="pt-2 border-t border-[#eff4ff] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                    {/* Bottom Actions: QR Code, Edit Stock, & Remove */}
+                    <div className="pt-2 border-t border-[#eff4ff] flex flex-wrap items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => setSelectedQrProduct(product)}
                           className="px-2.5 py-1 bg-[#eff4ff] hover:bg-[#dce1ff] text-[#0037b0] rounded-md text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                         >
                           <span className="material-symbols-outlined text-[15px]">qr_code_2</span>
-                          <span>View Product QR</span>
+                          <span>Product QR</span>
                         </button>
+
                         <button
                           onClick={() => onShowFeedbackPage(product)}
                           className="px-2 py-1 text-[#565e74] hover:text-[#0b1c30] text-[11px] font-semibold cursor-pointer"
                         >
-                          Feedback Form
+                          Feedback Page
                         </button>
                       </div>
 
-                      {isManagerOrOwner && (
-                        <button
-                          onClick={() => handleRemove(product)}
-                          className="text-[#ba1a1a] hover:text-[#93000a] text-[11px] font-bold p-1 cursor-pointer flex items-center gap-0.5"
-                          title="Remove product from catalog"
-                        >
-                          <span className="material-symbols-outlined text-[15px]">delete</span>
-                          <span>Remove</span>
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {isManagerOrOwner && (
+                          <button
+                            onClick={() => handleOpenEditStock(product)}
+                            className="px-2 py-1 bg-[#f8f9ff] hover:bg-[#eff4ff] text-[#0b1c30] border border-[#dae2fd] rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">edit</span>
+                            <span>Edit Stock</span>
+                          </button>
+                        )}
+
+                        {isManagerOrOwner && (
+                          <button
+                            onClick={() => handleRemove(product)}
+                            className="text-[#ba1a1a] hover:text-[#93000a] text-[11px] font-bold p-1 cursor-pointer flex items-center gap-0.5"
+                            title="Remove product from catalog"
+                          >
+                            <span className="material-symbols-outlined text-[15px]">delete</span>
+                            <span>Remove</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -317,7 +400,9 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
         <div className="space-y-3">
           {restockRequests.length === 0 ? (
             <div className="bg-white rounded-xl p-8 border border-[#e5eeff] text-center space-y-2">
-              <span className="material-symbols-outlined text-[32px] text-[#004f35]">check_circle</span>
+              <span className="material-symbols-outlined text-[32px] text-[#004f35]">
+                check_circle
+              </span>
               <h3 className="font-headline font-bold text-[16px] text-[#0b1c30]">
                 All Products Above Minimum Threshold
               </h3>
@@ -327,57 +412,163 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
             </div>
           ) : (
             <div className="space-y-2.5">
-              {restockRequests.map((req) => (
-                <div
-                  key={req.id}
-                  className="bg-white rounded-xl p-4 shadow-xs border border-[#e5eeff] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-headline font-bold text-[15px] text-[#0b1c30]">
-                        {req.productName} ({req.brand})
-                      </span>
-                      <span
-                        className={`px-2 py-0.2 rounded-full text-[10px] font-bold ${
-                          req.status === 'Approved'
-                            ? 'bg-[#85f8c4] text-[#002114]'
-                            : 'bg-[#ffdad6] text-[#ba1a1a]'
-                        }`}
-                      >
-                        {req.status}
-                      </span>
+              {restockRequests.map((req) => {
+                const prod = products.find((p) => p.id === req.productId);
+                return (
+                  <div
+                    key={req.id}
+                    className="bg-white rounded-xl p-4 shadow-xs border border-[#e5eeff] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-headline font-bold text-[15px] text-[#0b1c30]">
+                          {req.productName} ({req.brand})
+                        </span>
+                        <span
+                          className={`px-2 py-0.2 rounded-full text-[10px] font-bold ${
+                            req.status === 'Approved'
+                              ? 'bg-[#85f8c4] text-[#002114]'
+                              : 'bg-[#ffdad6] text-[#ba1a1a]'
+                          }`}
+                        >
+                          {req.status}
+                        </span>
+                      </div>
+                      <p className="text-[12px] text-[#565e74]">
+                        Current Stock: <strong className="text-[#ba1a1a]">{req.currentStock}</strong>{' '}
+                        • Minimum Threshold: <strong>{req.minThreshold}</strong> • Requested Replenishment:{' '}
+                        <strong className="text-[#0037b0]">{req.minThreshold} units</strong>
+                      </p>
+                      <p className="text-[11px] text-[#565e74]">
+                        Supplier: {req.supplierName} ({req.supplierEmail})
+                      </p>
                     </div>
-                    <p className="text-[12px] text-[#565e74]">
-                      Current Stock: <strong className="text-[#ba1a1a]">{req.currentStock}</strong> • Minimum Threshold: <strong>{req.minThreshold}</strong> • Requested Replenishment: <strong className="text-[#0037b0]">{req.minThreshold} units</strong>
-                    </p>
-                    <p className="text-[11px] text-[#565e74]">
-                      Supplier: {req.supplierName} ({req.supplierEmail})
-                    </p>
-                  </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => handleApprove(req)}
-                      className="px-3.5 py-2 bg-[#0037b0] hover:bg-[#1d4ed8] text-white rounded-lg text-[12px] font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">forward_to_inbox</span>
-                      <span>Approve &amp; Open Mail</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {/* Option for manager to edit stock upon approving or anytime */}
+                      {prod && isManagerOrOwner && (
+                        <button
+                          onClick={() => handleOpenEditStock(prod)}
+                          className="px-3 py-2 bg-[#eff4ff] hover:bg-[#dae2fd] text-[#0037b0] border border-[#dae2fd] rounded-lg text-[12px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">edit_note</span>
+                          <span>Edit Stock</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleApprove(req)}
+                        className="px-3.5 py-2 bg-[#0037b0] hover:bg-[#1d4ed8] text-white rounded-lg text-[12px] font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">
+                          forward_to_inbox
+                        </span>
+                        <span>Approve &amp; Open Mail</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* Product QR Code Modal */}
+      {/* EDIT STOCK QUANTITY MODAL (Manager Option) */}
+      {stockEditProduct && (
+        <div className="fixed inset-0 z-50 bg-[#213145]/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-sm border border-[#e5eeff] space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#eff4ff]">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[#0037b0] text-[22px]">
+                  inventory
+                </span>
+                <h3 className="font-headline font-bold text-[16px] text-[#0b1c30]">
+                  Edit Product Stock
+                </h3>
+              </div>
+              <button
+                onClick={() => setStockEditProduct(null)}
+                className="w-7 h-7 rounded-full bg-[#eff4ff] flex items-center justify-center text-[#565e74] cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            </div>
+
+            <div className="p-3 bg-[#f8f9ff] rounded-xl border border-[#dae2fd] space-y-1">
+              <h4 className="font-bold text-[14px] text-[#0b1c30]">{stockEditProduct.name}</h4>
+              <p className="text-[12px] text-[#565e74]">
+                Brand: {stockEditProduct.brand} • SKU: {stockEditProduct.sku}
+              </p>
+              <div className="flex justify-between text-[12px] pt-1 border-t border-[#dae2fd]">
+                <span>Current In-Store:</span>
+                <span className="font-bold">{stockEditProduct.availableStock} units</span>
+              </div>
+              <div className="flex justify-between text-[12px]">
+                <span>Safety Threshold:</span>
+                <span className="font-bold">{stockEditProduct.minThreshold} units</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveStock} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-[12px] font-semibold text-[#0b1c30]">
+                  New Available Stock Count *
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={newStockInput}
+                  onChange={(e) => setNewStockInput(e.target.value)}
+                  className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2.5 rounded-lg text-[14px] font-bold text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                />
+              </div>
+
+              {/* Quick Increment Presets */}
+              <div className="flex items-center gap-1.5 pt-1">
+                <span className="text-[11px] text-[#565e74]">Quick Add:</span>
+                {[stockEditProduct.minThreshold, 10, 25, 50].map((addQty) => (
+                  <button
+                    key={addQty}
+                    type="button"
+                    onClick={() =>
+                      setNewStockInput(String(stockEditProduct.availableStock + addQty))
+                    }
+                    className="px-2 py-1 bg-[#eff4ff] hover:bg-[#dae2fd] rounded text-[11px] font-bold text-[#0037b0] cursor-pointer"
+                  >
+                    +{addQty}
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStockEditProduct(null)}
+                  className="px-3.5 py-2 rounded-lg bg-[#eff4ff] text-[#0b1c30] text-[12px] font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-[#0037b0] text-white text-[12px] font-bold shadow-xs hover:bg-[#1d4ed8] cursor-pointer"
+                >
+                  Save Stock to DB
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Product Packaging QR Code Modal */}
       {selectedQrProduct && (
         <div className="fixed inset-0 z-50 bg-[#213145]/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-sm border border-[#e5eeff] space-y-4 text-center">
             <div className="flex items-center justify-between pb-2 border-b border-[#eff4ff]">
               <h3 className="font-headline font-bold text-[15px] text-[#0b1c30]">
-                Product Feedback QR Code
+                Product Packaging QR Code
               </h3>
               <button
                 onClick={() => setSelectedQrProduct(null)}
@@ -388,7 +579,10 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
             </div>
 
             <div className="flex flex-col items-center space-y-2 p-3 bg-[#f8f9ff] rounded-xl border border-[#dae2fd]">
-              <QRCodeSVG value={selectedQrProduct.qrCode} size={150} />
+              <QRCodeSVG
+                value={`${window.location.origin}/?feedback=${selectedQrProduct.id}`}
+                size={160}
+              />
               <div className="space-y-0.5">
                 <h4 className="font-headline font-bold text-[14px] text-[#0b1c30]">
                   {selectedQrProduct.name}
@@ -396,25 +590,33 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
                 <p className="text-[11px] text-[#565e74]">
                   {selectedQrProduct.brand} • Price: ₹{selectedQrProduct.price}
                 </p>
-                <p className="font-mono text-[10px] text-[#0037b0] font-bold">
-                  {selectedQrProduct.qrCode}
+                <p className="text-[10px] text-[#0037b0] font-mono break-all px-2 pt-1">
+                  {window.location.origin}/?feedback={selectedQrProduct.id}
                 </p>
               </div>
             </div>
 
             <p className="text-[11px] text-[#565e74]">
-              Print this QR code and attach it to packaging. Customers scan it with their phone to submit verified feedback.
+              Print and attach to product packaging. Any customer scanning this QR opens the verified feedback page on their phone.
             </p>
 
-            <div className="grid grid-cols-2 gap-2 pt-1">
+            <div className="grid grid-cols-3 gap-1.5 pt-1">
               <button
                 onClick={() => {
                   window.print();
                   setSelectedQrProduct(null);
                 }}
-                className="py-2 rounded-lg bg-[#0037b0] text-white text-[12px] font-bold cursor-pointer"
+                className="py-2 rounded-lg bg-[#0037b0] text-white text-[11px] font-bold cursor-pointer"
               >
                 Print Label
+              </button>
+              <button
+                onClick={() =>
+                  handleCopyQrLink(`${window.location.origin}/?feedback=${selectedQrProduct.id}`)
+                }
+                className="py-2 rounded-lg bg-[#eff4ff] border border-[#dae2fd] text-[#0037b0] text-[11px] font-bold cursor-pointer"
+              >
+                Copy Link
               </button>
               <button
                 onClick={() => {
@@ -422,9 +624,9 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
                   setSelectedQrProduct(null);
                   onShowFeedbackPage(prod);
                 }}
-                className="py-2 rounded-lg bg-[#eff4ff] border border-[#dae2fd] text-[#0037b0] text-[12px] font-bold cursor-pointer"
+                className="py-2 rounded-lg bg-[#eff4ff] border border-[#dae2fd] text-[#0037b0] text-[11px] font-bold cursor-pointer"
               >
-                Test Scan
+                Open Page
               </button>
             </div>
           </div>
@@ -437,7 +639,9 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
           <div className="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-lg border border-[#e5eeff] space-y-4 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-[#eff4ff]">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#0037b0] text-[22px]">add_box</span>
+                <span className="material-symbols-outlined text-[#0037b0] text-[22px]">
+                  add_box
+                </span>
                 <h3 className="font-headline font-bold text-[16px] text-[#0b1c30]">
                   Add New Product
                 </h3>
@@ -457,21 +661,21 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Pure Honey 250g"
+                    placeholder="e.g. Natural Forest Honey 250g"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2.5 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[12px] font-semibold text-[#0b1c30]">Brand *</label>
+                  <label className="text-[12px] font-semibold text-[#0b1c30]">Brand Name *</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Apex Apiaries"
+                    placeholder="e.g. WildOrigin"
                     value={brand}
                     onChange={(e) => setBrand(e.target.value)}
-                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2.5 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
                   />
                 </div>
               </div>
@@ -479,90 +683,117 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <label className="text-[12px] font-semibold text-[#0b1c30]">Category</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Pantry, Beverages"
+                  <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2.5 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
-                  />
+                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                  >
+                    <option value="Groceries">Groceries</option>
+                    <option value="Beverages">Beverages</option>
+                    <option value="Snacks">Snacks</option>
+                    <option value="Dairy">Dairy</option>
+                    <option value="Personal Care">Personal Care</option>
+                    <option value="Household">Household</option>
+                  </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[12px] font-semibold text-[#0b1c30]">Price (₹) *</label>
+                  <label className="text-[12px] font-semibold text-[#0b1c30]">
+                    Selling Price (₹) *
+                  </label>
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     required
-                    placeholder="Selling Price"
+                    placeholder="e.g. 150"
                     value={price}
                     onChange={(e) => setPrice(e.target.value)}
-                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2.5 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="text-[12px] font-semibold text-[#0b1c30]">Available Stock *</label>
+                  <label className="text-[12px] font-semibold text-[#0b1c30]">
+                    Initial Stock Count *
+                  </label>
                   <input
                     type="number"
+                    min="0"
                     required
                     placeholder="e.g. 50"
                     value={availableStock}
                     onChange={(e) => setAvailableStock(e.target.value)}
-                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2.5 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[12px] font-semibold text-[#ba1a1a]">Minimum Threshold *</label>
+                  <label className="text-[12px] font-semibold text-[#0b1c30]">
+                    Minimum Restock Threshold *
+                  </label>
                   <input
                     type="number"
+                    min="1"
                     required
                     placeholder="e.g. 10"
                     value={minThreshold}
                     onChange={(e) => setMinThreshold(e.target.value)}
-                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2.5 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
                   />
                 </div>
               </div>
 
-              {/* Supplier Information */}
-              <div className="pt-2 border-t border-[#eff4ff] space-y-2">
-                <span className="text-[12px] font-bold text-[#0037b0] block">Supplier Information</span>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-[#0b1c30]">Supplier Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. GreenFarms Distribution"
-                    value={supplierName}
-                    onChange={(e) => setSupplierName(e.target.value)}
-                    className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[12px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
+              <div className="pt-1 border-t border-[#eff4ff]">
+                <span className="text-[11px] font-bold text-[#565e74] uppercase tracking-wider block mb-2">
+                  Supplier Contact Details
+                </span>
+                <div className="space-y-2">
                   <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-[#0b1c30]">Supplier Email *</label>
+                    <label className="text-[12px] font-semibold text-[#0b1c30]">
+                      Supplier / Vendor Name *
+                    </label>
                     <input
-                      type="email"
+                      type="text"
                       required
-                      placeholder="orders@supplier.com"
-                      value={supplierEmail}
-                      onChange={(e) => setSupplierEmail(e.target.value)}
-                      className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[12px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                      placeholder="e.g. Western Agro Supplies"
+                      value={supplierName}
+                      onChange={(e) => setSupplierName(e.target.value)}
+                      className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-[#0b1c30]">Supplier Phone</label>
-                    <input
-                      type="tel"
-                      placeholder="+91 XXXXX XXXXX"
-                      value={supplierPhone}
-                      onChange={(e) => setSupplierPhone(e.target.value)}
-                      className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[12px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
-                    />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[12px] font-semibold text-[#0b1c30]">
+                        Supplier Email *
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        placeholder="orders@supplier.com"
+                        value={supplierEmail}
+                        onChange={(e) => setSupplierEmail(e.target.value)}
+                        className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[12px] font-semibold text-[#0b1c30]">
+                        Supplier Phone
+                      </label>
+                      <input
+                        type="tel"
+                        placeholder="+91 XXXXX XXXXX"
+                        value={supplierPhone}
+                        onChange={(e) => setSupplierPhone(e.target.value)}
+                        className="w-full bg-[#eff4ff] border border-[#dae2fd] p-2 rounded-lg text-[13px] text-[#0b1c30] outline-none focus:bg-white focus:border-[#0037b0]"
+                      />
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="p-3 bg-[#eff4ff] rounded-xl border border-[#dae2fd] text-[11px] text-[#565e74]">
+                A unique packaging QR code will be generated linking to the verified customer feedback page for this item.
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2">
@@ -577,7 +808,7 @@ export const ManagerProductsScreen: React.FC<ManagerProductsScreenProps> = ({
                   type="submit"
                   className="px-4 py-2 rounded-lg bg-[#0037b0] text-white text-[12px] font-bold shadow-xs hover:bg-[#1d4ed8] cursor-pointer"
                 >
-                  Save Product &amp; Generate QR
+                  Create Product &amp; QR
                 </button>
               </div>
             </form>

@@ -12,6 +12,7 @@ interface PosBillingScreenProps {
     tax: number,
     total: number,
     paymentMethod: 'Cash' | 'UPI' | 'Card',
+    customerPhone: string,
     cashierName: string,
     cashierEmail: string
   ) => void;
@@ -30,6 +31,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
   const [activeTab, setActiveTab] = useState<'checkout' | 'history'>('checkout');
   const [cart, setCart] = useState<Array<{ product: ProductItem; quantity: number }>>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'Cash' | 'Card'>('UPI');
   const [lastReceipt, setLastReceipt] = useState<SalesTransaction | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -101,7 +103,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
       (p) =>
         p.sku.toLowerCase() === query ||
         p.name.toLowerCase().includes(query) ||
-        p.qrCode.toLowerCase() === query
+        (p.qrCode && p.qrCode.toLowerCase().includes(query))
     );
 
     if (matched) {
@@ -121,6 +123,13 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
   const handleCheckout = () => {
     if (cart.length === 0) {
       onShowToast('Cart is empty. Add products to bill.');
+      return;
+    }
+
+    // Customer phone number is required to enable QR feedback mobile verification
+    const cleanPhone = customerPhone.trim();
+    if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 6) {
+      onShowToast('Customer phone number is required to store purchase records for QR feedback verification.');
       return;
     }
 
@@ -153,6 +162,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       cashierName: currentUser.name,
       cashierEmail: currentUser.email,
+      customerPhone: cleanPhone,
       items: salesItems,
       subtotal,
       tax,
@@ -166,6 +176,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
       tax,
       total,
       paymentMethod,
+      cleanPhone,
       currentUser.name,
       currentUser.email
     );
@@ -173,7 +184,8 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
     setLastReceipt(newTxn);
     setShowReceiptModal(true);
     setCart([]);
-    onShowToast(`Receipt ${receiptNum} completed! Stock updated in database.`);
+    setCustomerPhone('');
+    onShowToast(`Receipt ${receiptNum} completed for phone ${cleanPhone}! Recorded in database.`);
   };
 
   // Filter products for quick shelf
@@ -202,7 +214,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
               </span>
             </div>
             <span className="text-[11px] text-[#565e74]">
-              Active Cashier: <strong>{currentUser.name}</strong> • Stock auto-updates in DB
+              Active Cashier: <strong>{currentUser.name}</strong> • Records customer phone for QR verification
             </span>
           </div>
         </div>
@@ -360,7 +372,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
 
           {/* RIGHT: Current Billing Register Slip */}
           <div className="lg:col-span-5 bg-white rounded-xl p-4 shadow-xs border border-[#e5eeff] flex flex-col justify-between space-y-3">
-            <div>
+            <div className="space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-[#eff4ff]">
                 <div className="flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-[18px] text-[#0037b0]">
@@ -380,9 +392,30 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
                 )}
               </div>
 
+              {/* Customer Mobile Number Input (Mandatory for feedback verification!) */}
+              <div className="p-3 bg-[#f8f9ff] rounded-xl border border-[#dae2fd] space-y-1">
+                <label className="text-[11px] font-bold text-[#0b1c30] flex items-center justify-between">
+                  <span>Customer Phone Number *</span>
+                  <span className="text-[10px] text-[#0037b0] font-normal">
+                    Stored for QR Buyer Verification
+                  </span>
+                </label>
+                <div className="flex items-center gap-2 bg-white border border-[#dae2fd] rounded-lg px-2.5 py-1.5 focus-within:border-[#0037b0]">
+                  <span className="material-symbols-outlined text-[#747686] text-[16px]">call</span>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="Enter customer mobile no. (e.g. 9840123456)"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    className="w-full bg-transparent text-[13px] text-[#0b1c30] outline-none"
+                  />
+                </div>
+              </div>
+
               {/* Items in Slip */}
               {cart.length === 0 ? (
-                <div className="py-12 text-center space-y-2">
+                <div className="py-10 text-center space-y-2">
                   <span className="material-symbols-outlined text-[32px] text-[#dae2fd]">
                     shopping_basket
                   </span>
@@ -391,25 +424,28 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
                   </p>
                 </div>
               ) : (
-                <div className="divide-y divide-[#eff4ff] max-h-72 overflow-y-auto pr-1">
+                <div className="divide-y divide-[#eff4ff] max-h-60 overflow-y-auto pr-1">
                   {cart.map((item) => (
-                    <div key={item.product.id} className="py-2.5 flex items-center justify-between gap-2">
+                    <div
+                      key={item.product.id}
+                      className="py-2.5 flex items-center justify-between gap-2"
+                    >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[13px] font-bold text-[#0b1c30] truncate">
                             {item.product.name}
                           </span>
-                          {/* QR preview button */}
                           <button
                             onClick={() => setQrModalProduct(item.product)}
                             className="text-[#0037b0] hover:text-[#1d4ed8] cursor-pointer"
-                            title="View QR Code"
+                            title="View Packaging QR Code"
                           >
                             <span className="material-symbols-outlined text-[14px]">qr_code</span>
                           </button>
                         </div>
                         <span className="text-[11px] text-[#565e74] block">
-                          ₹{item.product.price} × {item.quantity} = ₹{item.product.price * item.quantity}
+                          ₹{item.product.price} × {item.quantity} = ₹
+                          {item.product.price * item.quantity}
                         </span>
                       </div>
 
@@ -492,7 +528,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
                   className="w-full py-3 bg-[#0037b0] hover:bg-[#1d4ed8] text-white rounded-xl text-[13px] font-bold shadow-md cursor-pointer flex items-center justify-center gap-1.5 active:scale-[0.99] transition-all"
                 >
                   <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                  <span>Complete Bill (₹{total})</span>
+                  <span>Complete Bill &amp; Update DB (₹{total})</span>
                 </button>
               </div>
             )}
@@ -506,7 +542,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
               Completed Sales Log ({transactions.length})
             </h3>
             <span className="text-[11px] text-[#565e74]">
-              Recorded transactions from cashier terminals
+              Recorded in store database with customer phone numbers
             </span>
           </div>
 
@@ -526,9 +562,16 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
                       <span className="px-2 py-0.2 rounded-full bg-[#85f8c4] text-[#002114] text-[10px] font-bold">
                         {txn.paymentMethod}
                       </span>
+                      {txn.customerPhone && (
+                        <span className="px-2 py-0.2 rounded-full bg-[#eff4ff] text-[#0037b0] text-[10px] font-bold border border-[#dae2fd] flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">call</span>
+                          <span>{txn.customerPhone}</span>
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-[#565e74] mt-0.5">
-                      Cashier: <strong>{txn.cashierName}</strong> • {txn.timestamp} • {txn.items.length} item{txn.items.length > 1 ? 's' : ''}
+                      Cashier: <strong>{txn.cashierName}</strong> • {txn.timestamp} •{' '}
+                      {txn.items.length} item{txn.items.length > 1 ? 's' : ''}
                     </div>
                     <div className="text-[11px] text-[#565e74] mt-1">
                       {txn.items.map((i) => `${i.name} (${i.quantity}x)`).join(', ')}
@@ -556,13 +599,13 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
         </div>
       )}
 
-      {/* Product QR Modal (shows the QR of the product as requested) */}
+      {/* Product QR Modal (shows the genuine QR of the product as requested) */}
       {qrModalProduct && (
         <div className="fixed inset-0 z-50 bg-[#213145]/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-sm border border-[#e5eeff] space-y-3 text-center">
             <div className="flex items-center justify-between pb-2 border-b border-[#eff4ff]">
               <h3 className="font-headline font-bold text-[15px] text-[#0b1c30]">
-                Product Feedback QR Code
+                Product Packaging QR Code
               </h3>
               <button
                 onClick={() => setQrModalProduct(null)}
@@ -573,17 +616,24 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
             </div>
 
             <div className="p-3 bg-[#f8f9ff] rounded-xl border border-[#dae2fd] flex flex-col items-center">
-              <QRCodeSVG value={qrModalProduct.qrCode} size={150} />
+              <QRCodeSVG
+                value={`${window.location.origin}/?feedback=${qrModalProduct.id}`}
+                size={160}
+              />
               <h4 className="font-bold text-[14px] text-[#0b1c30] mt-2">
                 {qrModalProduct.name}
               </h4>
               <p className="text-[11px] text-[#565e74]">
                 Brand: {qrModalProduct.brand} • Price: ₹{qrModalProduct.price}
               </p>
-              <p className="font-mono text-[10px] text-[#0037b0] mt-1 font-bold">
-                {qrModalProduct.qrCode}
+              <p className="font-mono text-[10px] text-[#0037b0] mt-1 break-all px-1">
+                {window.location.origin}/?feedback={qrModalProduct.id}
               </p>
             </div>
+
+            <p className="text-[11px] text-[#565e74]">
+              Customers can scan this QR code with any mobile camera to verify their purchase and rate the product.
+            </p>
 
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
@@ -603,7 +653,7 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
                 }}
                 className="py-2 bg-[#eff4ff] text-[#0037b0] border border-[#dae2fd] text-[12px] font-bold rounded-lg cursor-pointer"
               >
-                Open Feedback
+                Open Feedback Page
               </button>
             </div>
           </div>
@@ -624,9 +674,14 @@ export const PosBillingScreen: React.FC<PosBillingScreenProps> = ({
               <p className="text-[11px] text-[#565e74]">
                 Receipt {lastReceipt.receiptNumber} • {lastReceipt.timestamp}
               </p>
+              {lastReceipt.customerPhone && (
+                <div className="inline-block mt-1 px-2.5 py-0.5 rounded-full bg-[#eff4ff] text-[#0037b0] text-[11px] font-bold border border-[#dae2fd]">
+                  Customer: {lastReceipt.customerPhone}
+                </div>
+              )}
             </div>
 
-            <div className="space-y-1.5 text-[12px] max-h-48 overflow-y-auto">
+            <div className="space-y-1.5 text-[12px] max-h-44 overflow-y-auto">
               {lastReceipt.items.map((i, idx) => (
                 <div key={idx} className="flex justify-between text-[#0b1c30]">
                   <span>
