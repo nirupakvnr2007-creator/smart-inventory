@@ -1,53 +1,74 @@
 import React from 'react';
+import { RoleType } from '../types';
 
 interface NavigationProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  role: RoleType;
   criticalCount?: number;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
   activeTab,
   onTabChange,
+  role,
   criticalCount = 0
 }) => {
-  const tabs = [
-    {
-      id: 'auth-store',
-      label: 'Auth/Store',
-      icon: 'storefront'
-    },
-    {
-      id: 'inventory',
-      label: 'Inventory',
-      icon: 'shelves'
-    },
-    {
-      id: 'restock-suppliers',
-      label: 'Restock',
-      icon: 'local_shipping',
-      badge: criticalCount > 0 ? criticalCount : undefined
-    },
-    {
-      id: 'pos-billing',
-      label: 'POS',
-      icon: 'point_of_sale'
-    },
-    {
-      id: 'forum',
-      label: 'Forum',
-      icon: 'forum'
-    },
-    {
-      id: 'analytics-ai',
-      label: 'Analytics',
-      icon: 'auto_graph'
+  // Determine tabs dynamically based on user role
+  const getTabsForRole = () => {
+    switch (role) {
+      case 'Helper':
+        return [
+          { id: 'dashboard', label: 'Sales Trends', icon: 'trending_up' },
+          { id: 'forum', label: 'Discussion', icon: 'forum' }
+        ];
+
+      case 'Cashier':
+        return [
+          { id: 'billing', label: 'POS Billing', icon: 'point_of_sale' },
+          { id: 'dashboard', label: 'Sales Trends', icon: 'trending_up' },
+          { id: 'forum', label: 'Discussion', icon: 'forum' }
+        ];
+
+      case 'Manager':
+        return [
+          { id: 'inventory', label: 'Products', icon: 'inventory_2' },
+          {
+            id: 'restock',
+            label: 'Restock',
+            icon: 'local_shipping',
+            badge: criticalCount > 0 ? criticalCount : undefined
+          },
+          { id: 'dashboard', label: 'Sales Trends', icon: 'trending_up' },
+          { id: 'forum', label: 'Discussion', icon: 'forum' }
+        ];
+
+      case 'Owner':
+      default:
+        return [
+          { id: 'members', label: 'Members', icon: 'manage_accounts' },
+          { id: 'inventory', label: 'Products', icon: 'inventory_2' },
+          {
+            id: 'restock',
+            label: 'Restock',
+            icon: 'local_shipping',
+            badge: criticalCount > 0 ? criticalCount : undefined
+          },
+          { id: 'billing', label: 'Billing', icon: 'point_of_sale' },
+          { id: 'dashboard', label: 'Sales Trends', icon: 'trending_up' },
+          { id: 'forum', label: 'Discussion', icon: 'forum' }
+        ];
     }
-  ];
+  };
+
+  const tabs = getTabsForRole();
 
   return (
     <nav className="fixed bottom-0 inset-x-0 z-40 pb-safe bg-[#ffffff]/95 backdrop-blur-xl border-t border-[#e5eeff] shadow-[0_-2px_10px_rgba(0,0,0,0.04)]">
-      <div className="max-w-4xl mx-auto grid grid-cols-6 h-16 items-center px-1">
+      <div
+        className={`max-w-4xl mx-auto grid h-16 items-center px-2`}
+        style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+      >
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
@@ -57,7 +78,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               className={`flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] transition-all relative ${
                 isActive
                   ? 'text-[#0037b0] font-bold'
-                  : 'text-[#434655] hover:text-[#0b1c30]'
+                  : 'text-[#565e74] hover:text-[#0b1c30]'
               }`}
             >
               <div className="relative">
@@ -73,7 +94,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                   </span>
                 )}
               </div>
-              <span className="text-[10px] leading-tight text-center truncate max-w-[54px]">
+              <span className="text-[10px] leading-tight text-center truncate max-w-[64px]">
                 {tab.label}
               </span>
               {isActive && (
