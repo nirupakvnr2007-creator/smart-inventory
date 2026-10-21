@@ -109,7 +109,7 @@ export const PublicCustomerFeedbackScreen: React.FC<PublicCustomerFeedbackScreen
         return;
       }
     } catch {
-      // Fallback to local transactions check
+      // Local transactions verification check
     }
 
     // 2. Local database transactions check

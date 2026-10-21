@@ -96,7 +96,7 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
         return;
       }
 
-      // 2. Offline Fallback: Check local cached accounts if offline or server returned error
+      // 2. Local Database Authentication: Check local accounts
       const matchedUser = users.find(
         (u) =>
           (u.email || '').toLowerCase() === cleanEmail &&
@@ -105,7 +105,7 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
 
       if (matchedUser) {
         onLoginSuccess(matchedUser);
-        onShowToast(`Welcome back, ${matchedUser.name} (${matchedUser.role})! [Offline Mode]`);
+        onShowToast(`Welcome back, ${matchedUser.name} (${matchedUser.role})!`);
         return;
       }
 
@@ -114,11 +114,11 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
         setErrorMessage(res.message);
       } else {
         setErrorMessage(
-          'Invalid email id or password. If you registered on another device, ensure credentials match or ask the Shop Owner to verify your staff account.'
+          'Invalid email address or password. If you are registering an account, switch to "Register Shop" or ask your Store Owner to add your email in Team Members.'
         );
       }
     } catch {
-      // Check local cached array
+      // Check local database array
       const matchedUser = users.find(
         (u) =>
           (u.email || '').toLowerCase() === cleanEmail &&
@@ -126,9 +126,9 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
       );
       if (matchedUser) {
         onLoginSuccess(matchedUser);
-        onShowToast(`Welcome back, ${matchedUser.name} (${matchedUser.role})! [Offline Mode]`);
+        onShowToast(`Welcome back, ${matchedUser.name} (${matchedUser.role})!`);
       } else {
-        setErrorMessage('Invalid email or password. Please verify your credentials or ask the Owner.');
+        setErrorMessage('Invalid email or password. Please verify your credentials or register your account.');
       }
     } finally {
       setIsLoggingIn(false);
@@ -137,28 +137,23 @@ export const LoginGatewayScreen: React.FC<LoginGatewayScreenProps> = ({
 
   return (
     <div className="min-h-screen bg-[#f8f9ff] flex flex-col justify-center items-center p-4 selection:bg-[#dce1ff] selection:text-[#001551]">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-[#e5eeff] p-6 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-[#e5eeff] p-6 space-y-5">
         {/* Header Icon & Brand */}
         <div className="text-center space-y-1.5">
           <div className="w-12 h-12 rounded-xl bg-[#0037b0] text-white flex items-center justify-center mx-auto shadow-md">
             <span className="material-symbols-outlined text-[28px]">storefront</span>
           </div>
           <h1 className="font-headline font-bold text-[22px] text-[#0b1c30]">
-            Smart Inventory Assistant
+            Mepco Retail Hub
           </h1>
-          <div className="flex items-center justify-center gap-1.5 text-[12px] text-[#565e74]">
+          <div className="flex items-center justify-center gap-1.5 text-[12px] text-[#565e74] min-h-[20px]">
             {currentShop ? (
               <span className="inline-flex items-center gap-1 font-semibold text-[#0037b0] bg-[#eff4ff] px-2.5 py-0.5 rounded-full border border-[#dae2fd]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#004f35]"></span>
-                Shop: {currentShop.name}
+                Store: {currentShop.name}
               </span>
             ) : (
-              <span>Centralized Retail Management System</span>
-            )}
-            {isSyncingWithServer && (
-              <span className="text-[10px] text-[#0037b0] animate-pulse">
-                (Syncing DB...)
-              </span>
+              <span>Offline Inventory & Retail Point-of-Sale System</span>
             )}
           </div>
         </div>

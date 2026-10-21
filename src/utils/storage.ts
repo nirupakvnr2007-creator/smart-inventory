@@ -15,7 +15,8 @@ const STORAGE_KEYS = {
   RESTOCK: 'smart_inventory_restock',
   TRANSACTIONS: 'smart_inventory_transactions',
   FORUM: 'smart_inventory_forum',
-  REVIEWS: 'smart_inventory_reviews'
+  REVIEWS: 'smart_inventory_reviews',
+  SESSION_USER: 'smart_inventory_session_user'
 };
 
 export function loadStoredData() {
@@ -68,6 +69,23 @@ export function saveForumPosts(posts: ForumPost[]) {
 
 export function saveReviews(reviews: CustomerReview[]) {
   localStorage.setItem(STORAGE_KEYS.REVIEWS, JSON.stringify(reviews));
+}
+
+export function loadSessionUser(): UserAccount | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.SESSION_USER);
+    return raw ? (JSON.parse(raw) as UserAccount) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSessionUser(user: UserAccount | null) {
+  if (user) {
+    localStorage.setItem(STORAGE_KEYS.SESSION_USER, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.SESSION_USER);
+  }
 }
 
 export function clearAllData() {

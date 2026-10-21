@@ -33,7 +33,9 @@ import {
   saveRestockRequests,
   saveTransactions,
   saveForumPosts,
-  saveReviews
+  saveReviews,
+  loadSessionUser,
+  saveSessionUser
 } from './utils/storage';
 import {
   ProductItem,
@@ -46,8 +48,14 @@ import {
   CustomerReview
 } from './types';
 
+// Helper to prevent unnecessary re-renders when data has not changed
+function hasDataChanged(prev: any, next: any): boolean {
+  if (prev === next) return false;
+  return JSON.stringify(prev) !== JSON.stringify(next);
+}
+
 export default function App() {
-  // Load initial fallback from local storage
+  // Load initial dataset from local storage
   const [initialData] = useState(() => loadStoredData());
 
   const [currentShop, setCurrentShop] = useState<ShopProfile | null>(initialData.shop);
@@ -62,11 +70,19 @@ export default function App() {
   const [forumPosts, setForumPosts] = useState<ForumPost[]>(initialData.forumPosts);
   const [reviews, setReviews] = useState<CustomerReview[]>(initialData.reviews);
 
-  // Authentication State
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+  // Authentication State with persistent session
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => loadSessionUser());
 
   // Active Tab View
-  const [activeTab, setActiveTab] = useState<string>('members');
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const session = loadSessionUser();
+    if (session) {
+      if (session.role === 'Cashier') return 'billing';
+      if (session.role === 'Manager') return 'inventory';
+      if (session.role === 'Helper') return 'dashboard';
+    }
+    return 'members';
+  });
 
   // Modals & Public Feedback Route
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -85,45 +101,53 @@ export default function App() {
     }, 3500);
   }, []);
 
-  // Multi-device synchronization: Fetch server data on mount and periodically
-  const syncWithServer = useCallback(async () => {
-    setIsSyncing(true);
+  // Multi-device synchronization: Fetch server data with diff checking to prevent screen flickering
+  const syncWithServer = useCallback(async (isManual: boolean = false) => {
+    if (isManual) {
+      setIsSyncing(true);
+    }
     try {
       const serverData = await fetchServerData();
       if (serverData) {
-        if (serverData.shop) setCurrentShop(serverData.shop);
+        if (serverData.shop) {
+          setCurrentShop((prev) => (hasDataChanged(prev, serverData.shop) ? serverData.shop : prev));
+        }
         if (Array.isArray(serverData.users) && serverData.users.length > 0) {
-          setUsers(serverData.users);
+          setUsers((prev) => (hasDataChanged(prev, serverData.users) ? serverData.users : prev));
         }
         if (Array.isArray(serverData.products) && serverData.products.length > 0) {
-          setProducts(serverData.products);
+          setProducts((prev) => (hasDataChanged(prev, serverData.products) ? serverData.products : prev));
         }
         if (Array.isArray(serverData.restockRequests)) {
-          setRestockRequests(serverData.restockRequests);
+          setRestockRequests((prev) => (hasDataChanged(prev, serverData.restockRequests) ? serverData.restockRequests : prev));
         }
         if (Array.isArray(serverData.transactions)) {
-          setTransactions(serverData.transactions);
+          setTransactions((prev) => (hasDataChanged(prev, serverData.transactions) ? serverData.transactions : prev));
         }
         if (Array.isArray(serverData.forumPosts)) {
-          setForumPosts(serverData.forumPosts);
+          setForumPosts((prev) => (hasDataChanged(prev, serverData.forumPosts) ? serverData.forumPosts : prev));
         }
         if (Array.isArray(serverData.reviews)) {
-          setReviews(serverData.reviews);
+          setReviews((prev) => (hasDataChanged(prev, serverData.reviews) ? serverData.reviews : prev));
         }
       }
 
-      // Check MongoDB status
+      // Check MongoDB status silently
       const mongoStat = await apiGetMongoStatus();
       setIsMongoConnected(Boolean(mongoStat?.connected));
     } finally {
-      setIsSyncing(false);
+      if (isManual) {
+        setIsSyncing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    syncWithServer();
-    // Sync every 8 seconds for multi-device live data
-    const interval = setInterval(syncWithServer, 8000);
+    syncWithServer(false);
+    // Silent periodic background check (every 15 seconds) without UI layout shifts
+    const interval = setInterval(() => {
+      syncWithServer(false);
+    }, 15000);
     return () => clearInterval(interval);
   }, [syncWithServer]);
 
@@ -172,6 +196,7 @@ export default function App() {
     setCurrentShop(newShop);
     const updatedUsers = [owner, ...users.filter((u) => u.email !== owner.email)];
     setUsers(updatedUsers);
+    saveSessionUser(owner);
     setCurrentUser(owner);
     setActiveTab('members');
 
@@ -181,6 +206,7 @@ export default function App() {
   };
 
   const handleLoginSuccess = (user: UserAccount) => {
+    saveSessionUser(user);
     setCurrentUser(user);
     // Route to appropriate initial screen based on assigned role
     switch (user.role) {
@@ -201,6 +227,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    saveSessionUser(null);
     setCurrentUser(null);
     showToast('Signed out of shop account.');
   };

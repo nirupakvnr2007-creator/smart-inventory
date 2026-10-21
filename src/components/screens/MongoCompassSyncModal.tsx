@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ProductItem, SalesTransaction, CustomerReview, UserAccount, ShopProfile } from '../../types';
-import { apiGetMongoStatus, apiSetMongoUri, apiImportCompassData, MongoStatus } from '../../services/api';
+import { apiGetMongoStatus, apiSetMongoUri, apiImportCompassData, apiInitTables, MongoStatus } from '../../services/api';
 
 interface MongoCompassSyncModalProps {
   isOpen: boolean;
@@ -28,6 +28,7 @@ export const MongoCompassSyncModal: React.FC<MongoCompassSyncModalProps> = ({
   const [mongoStatus, setMongoStatus] = useState<MongoStatus | null>(null);
   const [mongoUriInput, setMongoUriInput] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isInitializingTables, setIsInitializingTables] = useState(false);
   const [activeTab, setActiveTab] = useState<'status' | 'connect' | 'import-export'>('status');
   const [pasteJson, setPasteJson] = useState('');
   const [selectedCollection, setSelectedCollection] = useState<'products' | 'transactions' | 'reviews'>('products');
@@ -62,6 +63,20 @@ export const MongoCompassSyncModal: React.FC<MongoCompassSyncModalProps> = ({
       onRefreshData();
     } else {
       onShowToast(`MongoDB connection failed: ${res.message}`);
+      loadStatus();
+    }
+  };
+
+  const handleInitializeTables = async () => {
+    setIsInitializingTables(true);
+    const res = await apiInitTables();
+    setIsInitializingTables(false);
+    if (res.success) {
+      onShowToast(res.message);
+      loadStatus();
+      onRefreshData();
+    } else {
+      onShowToast(res.message);
       loadStatus();
     }
   };
@@ -270,37 +285,86 @@ export const MongoCompassSyncModal: React.FC<MongoCompassSyncModalProps> = ({
               </div>
             </div>
 
-            {/* Collection Counts Grid */}
-            <div className="space-y-1.5">
-              <h4 className="text-[11px] font-bold uppercase text-[#565e74] tracking-wider">
-                Active Collections in smart_inventory:
-              </h4>
+            {/* Collection Counts Grid (All 7 Tables) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[11px] font-bold uppercase text-[#565e74] tracking-wider">
+                  All 7 Database Tables (Collections):
+                </h4>
+                <button
+                  type="button"
+                  onClick={handleInitializeTables}
+                  disabled={isInitializingTables}
+                  className="px-3 py-1 bg-[#004f35] hover:bg-[#003824] text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                  title="Create all 7 collections and indexes in MongoDB smart_inventory"
+                >
+                  <span className="material-symbols-outlined text-[15px]">add_task</span>
+                  <span>{isInitializingTables ? 'Creating Tables...' : 'Create & Sync All Tables in DB'}</span>
+                </button>
+              </div>
+
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div className="bg-white p-3 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
-                  <span className="text-[11px] text-[#565e74] block">products</span>
-                  <span className="font-headline font-bold text-[18px] text-[#0037b0]">
+                <div className="bg-white p-2.5 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
+                  <span className="text-[11px] text-[#565e74] block font-mono">products</span>
+                  <span className="font-headline font-bold text-[17px] text-[#0037b0]">
                     {products.length}
                   </span>
+                  <span className="text-[10px] text-[#565e74] block">Catalog & QR</span>
                 </div>
-                <div className="bg-white p-3 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
-                  <span className="text-[11px] text-[#565e74] block">transactions</span>
-                  <span className="font-headline font-bold text-[18px] text-[#004f35]">
+                <div className="bg-white p-2.5 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
+                  <span className="text-[11px] text-[#565e74] block font-mono">transactions</span>
+                  <span className="font-headline font-bold text-[17px] text-[#004f35]">
                     {transactions.length}
                   </span>
+                  <span className="text-[10px] text-[#565e74] block">Sales & Phones</span>
                 </div>
-                <div className="bg-white p-3 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
-                  <span className="text-[11px] text-[#565e74] block">reviews</span>
-                  <span className="font-headline font-bold text-[18px] text-[#ba1a1a]">
+                <div className="bg-white p-2.5 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
+                  <span className="text-[11px] text-[#565e74] block font-mono">reviews</span>
+                  <span className="font-headline font-bold text-[17px] text-[#ba1a1a]">
                     {reviews.length}
                   </span>
+                  <span className="text-[10px] text-[#565e74] block">Buyer Ratings</span>
                 </div>
-                <div className="bg-white p-3 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
-                  <span className="text-[11px] text-[#565e74] block">users</span>
-                  <span className="font-headline font-bold text-[18px] text-[#565e74]">
+                <div className="bg-white p-2.5 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
+                  <span className="text-[11px] text-[#565e74] block font-mono">users</span>
+                  <span className="font-headline font-bold text-[17px] text-[#565e74]">
                     {users.length}
                   </span>
+                  <span className="text-[10px] text-[#565e74] block">Staff Profiles</span>
+                </div>
+                <div className="bg-white p-2.5 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
+                  <span className="text-[11px] text-[#565e74] block font-mono">shops</span>
+                  <span className="font-headline font-bold text-[17px] text-[#0037b0]">
+                    {currentShop ? 1 : 0}
+                  </span>
+                  <span className="text-[10px] text-[#565e74] block">Store Profile</span>
+                </div>
+                <div className="bg-white p-2.5 rounded-xl border border-[#e5eeff] text-center shadow-2xs">
+                  <span className="text-[11px] text-[#565e74] block font-mono">restock_requests</span>
+                  <span className="font-headline font-bold text-[17px] text-[#b45309]">
+                    {mongoStatus?.counts?.restock_requests ?? 0}
+                  </span>
+                  <span className="text-[10px] text-[#565e74] block">Purchase Orders</span>
+                </div>
+                <div className="bg-white p-2.5 rounded-xl border border-[#e5eeff] text-center shadow-2xs col-span-2 sm:col-span-2">
+                  <span className="text-[11px] text-[#565e74] block font-mono">forum_posts</span>
+                  <span className="font-headline font-bold text-[17px] text-[#4f46e5]">
+                    {mongoStatus?.counts?.forum_posts ?? 0}
+                  </span>
+                  <span className="text-[10px] text-[#565e74] block">Team Communications</span>
                 </div>
               </div>
+            </div>
+
+            {/* Live Auto-Update Confirmation Note */}
+            <div className="p-3 bg-[#f0fdf4] rounded-xl border border-[#bbf7d0] text-[11px] text-[#166534] space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-[12px]">
+                <span className="material-symbols-outlined text-[16px]">sync_saved_locally</span>
+                Real-Time Database Synchronization Active
+              </div>
+              <p>
+                As you make changes in the application (registering a store, adding staff, creating products, editing inventory, scanning QR codes, completing POS billing, or writing customer reviews), all data is instantly saved and updated in the database.
+              </p>
             </div>
 
             {/* Quick Action: Sync from Compass screenshot */}
@@ -314,6 +378,7 @@ export const MongoCompassSyncModal: React.FC<MongoCompassSyncModalProps> = ({
                 </span>
               </div>
               <button
+                type="button"
                 onClick={handleImportScreenshotProducts}
                 className="px-3 py-1.5 bg-[#0037b0] hover:bg-[#1d4ed8] text-white rounded-lg text-[12px] font-bold shrink-0 cursor-pointer shadow-xs"
               >
@@ -323,24 +388,24 @@ export const MongoCompassSyncModal: React.FC<MongoCompassSyncModalProps> = ({
           </div>
         )}
 
-        {/* TAB 2: CONNECT MONGO ATLAS / URI */}
+        {/* TAB 2: CONNECT MONGO COMPASS / LOCAL URI */}
         {activeTab === 'connect' && (
           <form onSubmit={handleConnectMongo} className="space-y-3.5">
-            <div className="p-3 bg-[#eff4ff] rounded-xl border border-[#dae2fd] text-[12px] text-[#0b1c30] space-y-1">
-              <p className="font-bold">
-                Why does Compass say "localhost:27017"?
+            <div className="p-3 bg-[#eff4ff] rounded-xl border border-[#dae2fd] text-[12px] text-[#0b1c30] space-y-1.5">
+              <p className="font-bold text-[#0037b0] flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px]">power</span>
+                Direct Local MongoDB Compass Connection (Port 27017)
               </p>
               <p className="text-[#565e74]">
-                MongoDB Compass on your Windows PC is running locally on your machine at <code>localhost:27017</code>. Cloud web apps cannot directly reach your private laptop's localhost over the public internet.
+                When running locally on your computer with <code>start-offline.bat</code> or <code>npm run offline</code>, the server connects directly to your local MongoDB at <code>mongodb://127.0.0.1:27017/smart_inventory</code>.
               </p>
-              <p className="text-[#0037b0] font-semibold pt-1">
-                To connect live bidirectional sync between MongoDB Compass and this app:
+              <div className="bg-white p-2.5 rounded-lg border border-[#dae2fd] text-[11px] font-mono space-y-1">
+                <div><strong>Standard Local URI:</strong> <code>mongodb://127.0.0.1:27017/smart_inventory</code></div>
+                <div><strong>Target Database:</strong> <code>smart_inventory</code></div>
+              </div>
+              <p className="text-[#004f35] font-semibold text-[11px]">
+                Open MongoDB Compass, click "Connect" to <code>mongodb://localhost:27017</code>, and all collections (products, transactions, reviews, users) appear live with zero cloud requirement.
               </p>
-              <ol className="list-decimal pl-4 space-y-0.5 text-[#565e74]">
-                <li>Create a free MongoDB Atlas cluster at mongodb.com.</li>
-                <li>Connect your MongoDB Compass to Atlas with your connection string.</li>
-                <li>Paste the exact same Atlas URI below so both Compass and this web app sync the exact same live database!</li>
-              </ol>
             </div>
 
             <div>

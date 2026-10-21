@@ -243,3 +243,24 @@ export async function apiImportCompassData(
     return { success: false, count: 0 };
   }
 }
+
+export async function apiInitTables(): Promise<{
+  success: boolean;
+  collections: string[];
+  counts: Record<string, number>;
+  message: string;
+}> {
+  try {
+    const res = await fetch('/api/mongodb/init-tables', {
+      method: 'POST'
+    });
+    return await res.json();
+  } catch (err: any) {
+    return {
+      success: false,
+      collections: [],
+      counts: {},
+      message: err?.message || 'Failed to reach database initializer'
+    };
+  }
+}

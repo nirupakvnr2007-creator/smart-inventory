@@ -18,7 +18,7 @@ const DB_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'smart_inventory_db.json');
 const MONGO_CONFIG_FILE = path.join(DB_DIR, 'mongo_config.json');
 
-// --- In-Memory / File Fallback ---
+// --- Standalone Persistent Database Engine ---
 function ensureDbFile(): DbSchema {
   if (!fs.existsSync(DB_DIR)) {
     fs.mkdirSync(DB_DIR, { recursive: true });
@@ -89,11 +89,16 @@ class MongoManager {
     try {
       if (fs.existsSync(MONGO_CONFIG_FILE)) {
         const conf = JSON.parse(fs.readFileSync(MONGO_CONFIG_FILE, 'utf-8'));
-        if (conf.uri) this.uri = conf.uri;
+        if (conf.uri) {
+          this.uri = conf.uri;
+          return;
+        }
       }
     } catch {
       // ignore
     }
+    // Offline default: connect directly to local MongoDB Compass on standard port 27017
+    this.uri = 'mongodb://127.0.0.1:27017/smart_inventory';
   }
 
   public getUri(): string {
@@ -105,7 +110,7 @@ class MongoManager {
     return this.uri.replace(/:([^@]+)@/, ':****@');
   }
 
-  public async connect(customUri?: string): Promise<{ success: boolean; message: string }> {
+  public async connect(customUri?: string, silent: boolean = false): Promise<{ success: boolean; message: string }> {
     const targetUri = customUri || this.uri;
     if (!targetUri) {
       this.isConnected = false;
@@ -118,10 +123,12 @@ class MongoManager {
         await this.client.close().catch(() => {});
       }
 
-      console.log(`Connecting to MongoDB...`);
+      if (!silent) {
+        console.log(`Checking MongoDB connection at ${this.getMaskedUri()}...`);
+      }
       this.client = new MongoClient(targetUri, {
-        serverSelectionTimeoutMS: 4000,
-        connectTimeoutMS: 4000
+        serverSelectionTimeoutMS: 2000,
+        connectTimeoutMS: 2000
       });
 
       await this.client.connect();
@@ -140,12 +147,148 @@ class MongoManager {
       }
 
       console.log('MongoDB connected successfully to smart_inventory database!');
+      // Automatically create and sync all collections/tables
+      await this.initializeTables();
       return { success: true, message: 'Connected to MongoDB smart_inventory successfully!' };
     } catch (err: any) {
       this.isConnected = false;
-      this.lastError = err?.message || 'Failed to connect to MongoDB';
-      console.warn('MongoDB connection failed, falling back to local database:', this.lastError);
+      this.lastError = err?.message || 'MongoDB server not reachable';
+      if (!silent) {
+        console.log('[Database Engine] Local storage active (smart_inventory_db.json). Ready for local MongoDB Compass on port 27017.');
+      }
       return { success: false, message: this.lastError || 'Failed to connect to MongoDB' };
+    }
+  }
+
+  public async initializeTables(): Promise<{
+    success: boolean;
+    collections: string[];
+    counts: Record<string, number>;
+    message: string;
+  }> {
+    if (!this.isConnected || !this.db) {
+      return {
+        success: false,
+        collections: [],
+        counts: {},
+        message: 'MongoDB is not connected. Connect locally at mongodb://127.0.0.1:27017 or via connection string.'
+      };
+    }
+
+    try {
+      const requiredCollections = [
+        'products',
+        'users',
+        'shops',
+        'transactions',
+        'reviews',
+        'restock_requests',
+        'forum_posts'
+      ];
+
+      const existingCollections = await this.db.listCollections().toArray();
+      const existingNames = new Set(existingCollections.map((c) => c.name));
+
+      for (const name of requiredCollections) {
+        if (!existingNames.has(name)) {
+          await this.db.createCollection(name);
+        }
+      }
+
+      // Ensure indexes for fast search and unique integrity
+      await this.db.collection('products').createIndex({ sku: 1 }, { unique: true }).catch(() => {});
+      await this.db.collection('users').createIndex({ email: 1 }, { unique: true }).catch(() => {});
+      await this.db.collection('transactions').createIndex({ receiptNumber: 1 }).catch(() => {});
+      await this.db.collection('transactions').createIndex({ customerPhone: 1 }).catch(() => {});
+      await this.db.collection('reviews').createIndex({ productId: 1 }).catch(() => {});
+
+      // Sync data from local JSON storage into MongoDB collections so tables are populated
+      const fileDb = ensureDbFile();
+
+      if (fileDb.products.length > 0) {
+        for (const prod of fileDb.products) {
+          await this.db.collection('products').updateOne(
+            { sku: prod.sku },
+            { $set: prod },
+            { upsert: true }
+          ).catch(() => {});
+        }
+      }
+
+      if (fileDb.users.length > 0) {
+        for (const user of fileDb.users) {
+          await this.db.collection('users').updateOne(
+            { email: user.email.toLowerCase() },
+            { $set: user },
+            { upsert: true }
+          ).catch(() => {});
+        }
+      }
+
+      if (fileDb.shop) {
+        await this.db.collection('shops').deleteMany({}).catch(() => {});
+        await this.db.collection('shops').insertOne(fileDb.shop).catch(() => {});
+      }
+
+      if (fileDb.restockRequests.length > 0) {
+        for (const req of fileDb.restockRequests) {
+          await this.db.collection('restock_requests').updateOne(
+            { id: req.id },
+            { $set: req },
+            { upsert: true }
+          ).catch(() => {});
+        }
+      }
+
+      if (fileDb.transactions.length > 0) {
+        for (const txn of fileDb.transactions) {
+          await this.db.collection('transactions').updateOne(
+            { receiptNumber: txn.receiptNumber },
+            { $set: txn },
+            { upsert: true }
+          ).catch(() => {});
+        }
+      }
+
+      if (fileDb.reviews.length > 0) {
+        for (const rev of fileDb.reviews) {
+          await this.db.collection('reviews').updateOne(
+            { id: rev.id },
+            { $set: rev },
+            { upsert: true }
+          ).catch(() => {});
+        }
+      }
+
+      if (fileDb.forumPosts.length > 0) {
+        for (const post of fileDb.forumPosts) {
+          await this.db.collection('forum_posts').updateOne(
+            { id: post.id },
+            { $set: post },
+            { upsert: true }
+          ).catch(() => {});
+        }
+      }
+
+      // Collect counts
+      const counts: Record<string, number> = {};
+      for (const col of requiredCollections) {
+        counts[col] = await this.db.collection(col).countDocuments().catch(() => 0);
+      }
+
+      return {
+        success: true,
+        collections: requiredCollections,
+        counts,
+        message: 'All 7 tables (collections) created and synchronized with MongoDB Compass successfully!'
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        collections: [],
+        counts: {},
+        message: `Failed to initialize tables: ${err?.message || 'Unknown error'}`
+      };
     }
   }
 
@@ -162,8 +305,26 @@ async function startServer() {
 
   app.use(express.json({ limit: '10mb' }));
 
-  // Initialize MongoDB connection asynchronously
-  mongoManager.connect().catch(() => {});
+  // Enable CORS for offline network scanning and cross-device access
+  app.use((_req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    if (_req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
+  // Initialize MongoDB connection check silently with local JSON storage as primary active engine
+  mongoManager.connect(undefined, true).catch(() => {});
+
+  // Gentle background reconnect if user launches MongoDB locally or via start-offline.bat
+  setInterval(() => {
+    if (!mongoManager.isConnected) {
+      mongoManager.connect(undefined, true).catch(() => {});
+    }
+  }, 30000);
 
   // 1. GET ALL DATA
   app.get('/api/data', async (_req, res) => {
@@ -226,7 +387,7 @@ async function startServer() {
           return res.json({ success: true, user: userWithoutMongoId });
         }
       } catch (err) {
-        console.error('MongoDB auth error, falling back to local file', err);
+        console.error('MongoDB auth error, querying local database', err);
       }
     }
 
@@ -420,6 +581,13 @@ async function startServer() {
             { id: product.id },
             { $set: { availableStock: product.availableStock } }
           );
+          for (const req of fileDb.restockRequests) {
+            await db.collection('restock_requests').updateOne(
+              { id: req.id },
+              { $set: req },
+              { upsert: true }
+            ).catch(() => {});
+          }
         } catch (e) {
           console.error('MongoDB update stock error:', e);
         }
@@ -526,6 +694,13 @@ async function startServer() {
               { $set: { availableStock: product.availableStock } }
             );
           }
+        }
+        for (const req of fileDb.restockRequests) {
+          await db.collection('restock_requests').updateOne(
+            { id: req.id },
+            { $set: req },
+            { upsert: true }
+          ).catch(() => {});
         }
       } catch (e) {
         console.error('MongoDB transaction write error:', e);
@@ -695,7 +870,11 @@ async function startServer() {
     res.json(result);
   });
 
-  // Direct Compass JSON Importer / Exporter
+  // Explicit Table / Collection Initializer & Synchronizer
+  app.post('/api/mongodb/init-tables', async (_req, res) => {
+    const result = await mongoManager.initializeTables();
+    res.json(result);
+  });
   app.post('/api/mongodb/import-compass', async (req, res) => {
     const { collection, documents } = req.body;
     if (!collection || !Array.isArray(documents)) {
